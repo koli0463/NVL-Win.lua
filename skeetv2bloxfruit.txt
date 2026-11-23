@@ -1,0 +1,5 @@
+Bạn ko đọc hết source mà sử dụng tính năng tìm kiếm đến các đoạn như “Positionbody” gồm core logic của nó . Source này sử dụng prediction như horizon và vertical . Prediction được apply nếu tool đang cầm là súng được set prediction, ví dụ predict cho revoler thì set horzinal predic là 0.134422 còn vertical là 0.3568278 nếu tool sử dụng không phải revoler thì predic sẽ được reset tại tool được set predict . Tất nhiên điều này không còn quan trọng vì chúng ta sắp làm 1 cái toggle positionbody khi bật silent aim với target được set từ aimbot (hoạt động thế nào ? : Đầu tiên Enable aimbot lên, sau đó chọn keybind target , (check như : behind wall,knocked), khi ấn keybind để target  thì silent aim và aim assist(aim camera) được bật , tiếp theo silent aim và aim asisst chạy theo predict với tool được set) được sử dụng cho blox fruit . Source về offset của blox fruit t sẽ ném sao để việc security và hiệu quả tốt hơn . 
+
+ === Yêu cầu === : 
+
+Bạn chỉ việc add cái core logic của position body và toggle , sử dụng hoàn toàn y chang như source và nếu có method gì đó giúp nó hoạt động hiệu quả hơn thì càng tốt 
