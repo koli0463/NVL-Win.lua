@@ -33,14 +33,33 @@ local safeRequest = (syn and syn.request) or (http and http.request) or http_req
 -- Load local asset bundle
 local Assets = {}
 pcall(function()
-	if isfile and isfile("memory_assets.lua") then
-		Assets = loadstring(readfile("memory_assets.lua"))()
-	elseif isfile and isfile("uisimbl/memory_assets.lua") then
+	if isfile and isfile("uisimbl/memory_assets.lua") then
 		Assets = loadstring(readfile("uisimbl/memory_assets.lua"))()
+	elseif isfile and isfile("memory_assets.lua") then
+		Assets = loadstring(readfile("memory_assets.lua"))()
 	end
 end)
 Assets = Assets or {}
 Assets.Icons = Assets.Icons or {}
+
+-- Guarantee reset icon is loaded (offline custom asset PNG, 0 font dependency)
+if not Assets.Icons['reset'] or Assets.Icons['reset'] == "" then
+	pcall(function()
+		local p = 'uisimbl/assets/icons/reset.png'
+		if isfile and isfile(p) and getcustomasset then
+			Assets.Icons['reset'] = getcustomasset(p)
+		else
+			local decode = (crypt and (crypt.base64_decode or crypt.base64decode)) or (base64_decode or base64decode)
+			if decode and writefile and getcustomasset then
+				if isfolder and not isfolder('uisimbl') then makefolder('uisimbl') end
+				if isfolder and not isfolder('uisimbl/assets') then makefolder('uisimbl/assets') end
+				if isfolder and not isfolder('uisimbl/assets/icons') then makefolder('uisimbl/assets/icons') end
+				writefile(p, decode('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACmElEQVR4nO2WO2hUQRSG/5NNoqKI4gMlhcFCBO0kaRUl2tjYqKCNiJXYWVlZiliJ1hosRLBIIILY2Fn5QCGNnQiKgoIkBvPY/eSYM2Fyubt7dxO1yQ/DzJ05c+a8z5XW8J9hVYiAHkk9ZraQ7S27a2asqgDEo5LqiTnQm47NrF6grwW/JfquAFg8nu8dAO4C1/IHgS0xNpQIs2IL7Jd0UtIpScOSXPsjkjZKOi1pSNLuIJ+S9FLShKQnZvY1lKCyNYCe0P4QMAH8Yjk+AW9pjy/AldyinQowCMwEszmgDjSyB3yvGWaz9SNgW/BsKoQVhKh5cAHnJT3wgJKU/OmmbMS3m/y5pDdxtkfSiKSB+J6VtE7SMzM74cqZWaNyAAL9wKvQJFnAZ8dtYKDk7mY3PfAj6KZjvpmUq+qKWsyHgYVsOC7ldJ6WMZaYA8PA96D3mDlXllktBWDxwvHQOvn1Tpz3lTGLO/2xPgPcSHWjciAWLHA/c8EUsD3c01KTkhpSuSYoRawXFuB9FtFjZcxbCRGuaat5b3HDC0dUtp3Z9uuYXYC20RwR3z7qtciwGfIK1n1t71KAeUk/s+/Bvy1IWRCORf77+AysT9VSLdCu8lWxgMU8Hmu3xi5JF8O3fS0e94pXvQG1yYQdUVBSIfJUHCoUoVo+4mxT1lesWyFqMV+ONEyd8RtwtsU9r4LvgNFcoZUK8bgghOMFcBU4ChwDLgDjhU45mltjJa7YCjwNpo1Cyy3CXTUf64/A3o76QBG55MD1wuMLofFc9mjCQxe8yKMrkAUTcBC4BUxmHTLhA3APGClToBmsA0H+/KyktaR9kZ6OaUmTZjYT5539D1ZFajItzpfSsSqsE+LsIb+XRkJj1TVeg/4BfgN6haWYutuDDwAAAABJRU5ErkJggg=='))
+				Assets.Icons['reset'] = getcustomasset(p)
+			end
+		end
+	end)
+end
 
 -- Ensure logos are resolved
 local function GetLogoAsset(preferLeywin)
@@ -1103,6 +1122,16 @@ function MemoryUI:CreateSpectators(config)
 end
 
 -- ========================================================================
+-- Dropdown Management (Auto-close on tab switch, prevent bleed-through)
+-- ========================================================================
+function MemoryUI:CloseActiveDropdown()
+	if self.ActiveDropdown and typeof(self.ActiveDropdown.Close) == "function" then
+		pcall(self.ActiveDropdown.Close)
+		self.ActiveDropdown = nil
+	end
+end
+
+-- ========================================================================
 -- Sub-Settings Popout Modal (Toggled via Gear Button ⚙, NO 'X' button)
 -- ========================================================================
 function MemoryUI:OpenSubSettings(config)
@@ -1116,6 +1145,10 @@ function MemoryUI:OpenSubSettings(config)
 
 	-- Smooth Close Helper
 	local function CloseModal()
+		if self.ActiveSubSettingsBackdrop and self.ActiveSubSettingsBackdrop.Parent then
+			self.ActiveSubSettingsBackdrop:Destroy()
+			self.ActiveSubSettingsBackdrop = nil
+		end
 		if self.ActiveSubSettings and self.ActiveSubSettings.Parent and not self.ActiveSubSettingsClosing then
 			self.ActiveSubSettingsClosing = true
 			local targetModal = self.ActiveSubSettings
@@ -1150,6 +1183,23 @@ function MemoryUI:OpenSubSettings(config)
 	end
 
 	self.ActiveSubSettingsOwner = owner
+
+	-- Full-screen modal isolation backdrop (blocks click pass-through to background elements)
+	local Backdrop = Create("TextButton", {
+		Name = "SubSettingsBackdrop",
+		Parent = self.ScreenGui,
+		Size = UDim2.new(1, 0, 1, 0),
+		Position = UDim2.new(0, 0, 0, 0),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		Active = true,
+		ZIndex = 399,
+	})
+	Backdrop.MouseButton1Click:Connect(function()
+		CloseModal()
+	end)
+	self.ActiveSubSettingsBackdrop = Backdrop
 
 	local targetPos = config.Position or UDim2.new(0.5, -100, 0.5, -70)
 	local Modal = Create("Frame", {
@@ -2428,16 +2478,19 @@ function MemoryUI:CreateWindow(config)
 					})
 
 					pBtn.MouseButton1Click:Connect(function()
+						MemoryUI:CloseActiveDropdown()
 						Tab.CurrentSubTab = sName
 						RenderSubTabs()
 						FilterCardsBySubTab()
 					end)
 				end
 			end
+			MemoryUI:CloseActiveDropdown()
 			FilterCardsBySubTab()
 		end
 
 		local function SelectTab()
+			MemoryUI:CloseActiveDropdown()
 			if CurrentTab == Tab then return end
 			local oldTab = CurrentTab
 			CurrentTab = Tab
@@ -2960,18 +3013,15 @@ function MemoryUI:CreateWindow(config)
 					Tween(ValueBoxStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
 				end)
 
-				-- Reset Button (↺) to restore original default value
-				local ResetBtn = Create("TextButton", {
+				-- Reset Button (with local asset icon to completely eliminate tofu glyph box [])
+				local ResetBtn = Create("ImageButton", {
 					Name = "ResetBtn",
 					Parent = Row,
 					Size = UDim2.new(0, 22, 0, 22),
 					Position = UDim2.new(1, -30, 0.5, -11),
 					BackgroundColor3 = Color3.fromRGB(18, 20, 24),
 					BorderSizePixel = 0,
-					Font = Enum.Font.GothamBold,
-					Text = "↺",
-					TextColor3 = Color3.fromRGB(140, 145, 160),
-					TextSize = 13,
+					Image = "",
 					AutoButtonColor = false,
 					ZIndex = 6,
 				})
@@ -2981,17 +3031,33 @@ function MemoryUI:CreateWindow(config)
 					Color = Color3.fromRGB(30, 34, 42),
 					Thickness = 1,
 				})
+				local resetAsset = (Assets.Icons and Assets.Icons.reset) or ""
+				if (not resetAsset or resetAsset == "") and isfile and isfile("uisimbl/assets/icons/reset.png") and getcustomasset then
+					resetAsset = getcustomasset("uisimbl/assets/icons/reset.png")
+				end
+
+				local ResetIcon = Create("ImageLabel", {
+					Name = "Icon",
+					Parent = ResetBtn,
+					Size = UDim2.new(0, 13, 0, 13),
+					Position = UDim2.new(0.5, -6.5, 0.5, -6.5),
+					BackgroundTransparency = 1,
+					Image = resetAsset or "",
+					ImageColor3 = Color3.fromRGB(140, 145, 160),
+					ScaleType = Enum.ScaleType.Fit,
+					ZIndex = 7,
+				})
 
 				ResetBtn.MouseEnter:Connect(function()
 					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(26, 29, 38) })
 					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
-					Tween(ResetBtn, TweenInfo.new(0.18), { TextColor3 = Theme.TextWhite })
+					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Theme.TextWhite })
 				end)
 
 				ResetBtn.MouseLeave:Connect(function()
 					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(18, 20, 24) })
 					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Color3.fromRGB(30, 34, 42) })
-					Tween(ResetBtn, TweenInfo.new(0.18), { TextColor3 = Color3.fromRGB(140, 145, 160) })
+					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Color3.fromRGB(140, 145, 160) })
 				end)
 
 				-- Snow Particle Effect
@@ -3244,6 +3310,7 @@ function MemoryUI:CreateWindow(config)
 					Size = UDim2.new(0, Button.AbsoluteSize.X, 0, #options * 26 + 8),
 					BackgroundColor3 = Color3.fromRGB(15, 16, 19),
 					BorderSizePixel = 0,
+					Active = true,
 					Visible = false,
 					ZIndex = 150,
 				})
@@ -3256,6 +3323,56 @@ function MemoryUI:CreateWindow(config)
 					Padding = UDim.new(0, 2),
 				})
 				Create("UIPadding", { Parent = ListBox, PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) })
+
+				local DropdownBackdrop = nil
+				local function CloseDropdown()
+					if not isOpen then return end
+					isOpen = false
+					ListBox.Visible = false
+					if DropdownBackdrop and DropdownBackdrop.Parent then
+						DropdownBackdrop:Destroy()
+						DropdownBackdrop = nil
+					end
+					Tween(Chevron, TweenInfo.new(0.2), { Rotation = 0 })
+					Tween(Stroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(24, 26, 32) })
+					if MemoryUI.ActiveDropdown and MemoryUI.ActiveDropdown.Instance == ListBox then
+						MemoryUI.ActiveDropdown = nil
+					end
+				end
+
+				local function OpenDropdown()
+					MemoryUI:CloseActiveDropdown()
+					isOpen = true
+					ListBox.Size = UDim2.new(0, Button.AbsoluteSize.X, 0, #options * 26 + 8)
+					ListBox.Position = UDim2.new(0, Button.AbsolutePosition.X, 0, Button.AbsolutePosition.Y + Button.AbsoluteSize.Y + 4)
+					ListBox.Visible = true
+
+					-- Full-screen blocker to prevent click pass-through to background sliders/cards
+					if not DropdownBackdrop or not DropdownBackdrop.Parent then
+						DropdownBackdrop = Create("TextButton", {
+							Name = "DropdownBackdrop",
+							Parent = ScreenGui,
+							Size = UDim2.new(1, 0, 1, 0),
+							Position = UDim2.new(0, 0, 0, 0),
+							BackgroundTransparency = 1,
+							Text = "",
+							AutoButtonColor = false,
+							Active = true,
+							ZIndex = 149,
+						})
+						DropdownBackdrop.MouseButton1Click:Connect(function()
+							CloseDropdown()
+						end)
+					end
+
+					Tween(Chevron, TweenInfo.new(0.2), { Rotation = 180 })
+					Tween(Stroke, TweenInfo.new(0.2), { Color = Theme.Accent })
+
+					MemoryUI.ActiveDropdown = {
+						Instance = ListBox,
+						Close = CloseDropdown,
+					}
+				end
 
 				local function Populate()
 					for _, ch in ipairs(ListBox:GetChildren()) do
@@ -3280,10 +3397,7 @@ function MemoryUI:CreateWindow(config)
 						optBtn.MouseButton1Click:Connect(function()
 							selected = opt
 							SelectLabel.Text = tostring(selected)
-							isOpen = false
-							ListBox.Visible = false
-							Tween(Chevron, TweenInfo.new(0.2), { Rotation = 0 })
-							Tween(Stroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(24, 26, 32) })
+							CloseDropdown()
 							Populate()
 							pcall(callback, selected)
 						end)
@@ -3309,15 +3423,15 @@ function MemoryUI:CreateWindow(config)
 							return
 						end
 					end
-					isOpen = not isOpen
-					ListBox.Size = UDim2.new(0, Button.AbsoluteSize.X, 0, #options * 26 + 8)
-					ListBox.Position = UDim2.new(0, Button.AbsolutePosition.X, 0, Button.AbsolutePosition.Y + Button.AbsoluteSize.Y + 4)
-					ListBox.Visible = isOpen
-					Tween(Chevron, TweenInfo.new(0.2), { Rotation = isOpen and 180 or 0 })
-					Tween(Stroke, TweenInfo.new(0.2), { Color = isOpen and Theme.Accent or Color3.fromRGB(24, 26, 32) })
+					if isOpen then
+						CloseDropdown()
+					else
+						OpenDropdown()
+					end
 				end)
 
 				local dropObj = {
+					Close = CloseDropdown,
 					Set = function(v, extra)
 						local opt = (extra ~= nil and extra) or v
 						selected = opt

@@ -68,10 +68,10 @@ end
 -- Load Asset Bundle
 local MemoryAssets = nil
 pcall(function()
-	if isfile and isfile("memory_assets.lua") then
-		MemoryAssets = loadstring(readfile("memory_assets.lua"))()
-	elseif isfile and isfile("uisimbl/memory_assets.lua") then
+	if isfile and isfile("uisimbl/memory_assets.lua") then
 		MemoryAssets = loadstring(readfile("uisimbl/memory_assets.lua"))()
+	elseif isfile and isfile("memory_assets.lua") then
+		MemoryAssets = loadstring(readfile("memory_assets.lua"))()
 	end
 end)
 MemoryAssets = MemoryAssets or { Icons = {} }
@@ -79,10 +79,10 @@ MemoryAssets = MemoryAssets or { Icons = {} }
 -- Load Library
 local MemoryUI = nil
 pcall(function()
-	if isfile and isfile("lib.lua") then
-		MemoryUI = loadstring(readfile("lib.lua"))()
-	elseif isfile and isfile("uisimbl/lib.lua") then
+	if isfile and isfile("uisimbl/lib.lua") then
 		MemoryUI = loadstring(readfile("uisimbl/lib.lua"))()
+	elseif isfile and isfile("lib.lua") then
+		MemoryUI = loadstring(readfile("lib.lua"))()
 	elseif isfile and isfile("uisimbl/memory_library.lua") then
 		MemoryUI = loadstring(readfile("uisimbl/memory_library.lua"))()
 	end
@@ -226,6 +226,8 @@ local CombatState = {
 	TeleportBoost = false,
 
 	-- New Combat Methods
+	TargetPlayers = true,
+	TargetNPCs = false,
 	Triggerbot = false,
 	TriggerbotDelay = 35,
 	TriggerbotHeadOnly = false,
@@ -240,6 +242,7 @@ local CombatState = {
 	LockedPlayer = nil,
 	LockedTargetPart = nil,
 }
+getgenv().CombatState = CombatState
 
 local CurrentTarget = nil
 local CurrentTargetPart = nil
@@ -248,6 +251,7 @@ local CoreGui = (gethui and gethui()) or (cloneref and cloneref(game:GetService(
 local UserInputService = cloneref and cloneref(game:GetService("UserInputService")) or game:GetService("UserInputService")
 local RunService = cloneref and cloneref(game:GetService("RunService")) or game:GetService("RunService")
 local Players = cloneref and cloneref(game:GetService("Players")) or game:GetService("Players")
+local TweenService = cloneref and cloneref(game:GetService("TweenService")) or game:GetService("TweenService")
 local Workspace = cloneref and cloneref(game:GetService("Workspace")) or game:GetService("Workspace")
 local Camera = Workspace.CurrentCamera
 local lp = Players.LocalPlayer
@@ -315,16 +319,22 @@ local function GetClosestTarget()
 	-- If Target priority is active and we have a valid locked player, stick with them
 	if CombatState.TargetPriority == "Target" and CombatState.LockedPlayer then
 		local p = CombatState.LockedPlayer
-		local char = p and p.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		local head = char and char:FindFirstChild("Head")
-		if p and p.Parent and char and hum and hum.Health > 0 and (hrp or head) then
-			local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
-			return p, targetPart
-		else
+		local isPlayer = p and typeof(p) == "Instance" and p:IsA("Player")
+		if isPlayer and CombatState.TargetPlayers == false then
 			CombatState.LockedPlayer = nil
 			CombatState.LockedTargetPart = nil
+		else
+			local char = isPlayer and p.Character or p
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			local head = char and char:FindFirstChild("Head")
+			if char and char.Parent and hum and hum.Health > 0 and (hrp or head) then
+				local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+				return p, targetPart
+			else
+				CombatState.LockedPlayer = nil
+				CombatState.LockedTargetPart = nil
+			end
 		end
 	end
 
@@ -334,59 +344,111 @@ local function GetClosestTarget()
 	local bestScore = math.huge
 	local camPos = Camera and Camera.CFrame.Position or Vector3.zero
 
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= lp and player.Character then
-			local char = player.Character
-			local hum = char:FindFirstChildOfClass("Humanoid")
-			local hrp = char:FindFirstChild("HumanoidRootPart")
-			local head = char:FindFirstChild("Head")
+	-- 1. Scan Players (Only when TargetPlayers is enabled)
+	if CombatState.TargetPlayers ~= false then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= lp and player.Character then
+				local char = player.Character
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				local head = char:FindFirstChild("Head")
 
-			if hum and hum.Health > 0 and (hrp or head) then
-				if CombatState.IgnoreFriends and Spectators and Spectators.GetRelation then
-					local rel = Spectators.GetRelation(player.Name)
-					if rel == "Friendly" then
-						continue
+				if hum and hum.Health > 0 and (hrp or head) then
+					if CombatState.IgnoreFriends and Spectators and Spectators.GetRelation then
+						local rel = Spectators.GetRelation(player.Name)
+						if rel == "Friendly" then
+							continue
+						end
 					end
-				end
 
-				local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
-				local partPos = targetPart.Position
-				local distToPlayer = (camPos - partPos).Magnitude
+					local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+					local partPos = targetPart.Position
+					local distToPlayer = (camPos - partPos).Magnitude
 
-				if distToPlayer <= CombatState.MaxDistance then
-					local screenPos, onScreen = Camera:WorldToViewportPoint(partPos)
-					if onScreen then
-						local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-						if screenDist <= CombatState.FOVRadius then
-							local isVisible = true
-							if CombatState.VisibleCheck and not CombatState.Autowall then
-								local rayParams = RaycastParams.new()
-								rayParams.FilterType = Enum.RaycastFilterType.Exclude
-								rayParams.FilterDescendantsInstances = { lp.Character, char }
-								local rayResult = Workspace:Raycast(camPos, partPos - camPos, rayParams)
-								if rayResult then
-									isVisible = false
-								end
-							end
-
-							if isVisible then
-								local score = screenDist
-								if CombatState.TargetPriority == "Lowest Distance" then
-									score = distToPlayer
-								elseif CombatState.TargetPriority == "Lowest Health" then
-									score = hum.Health
-								else
-									-- "Closest to Crosshair" or "Target" default fallback
-									score = screenDist
-									if CombatState.PrioritizeLowHealth then
-										score = score * (hum.Health / math.max(hum.MaxHealth, 1))
+					if distToPlayer <= CombatState.MaxDistance then
+						local screenPos, onScreen = Camera:WorldToViewportPoint(partPos)
+						if onScreen then
+							local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+							if screenDist <= CombatState.FOVRadius then
+								local isVisible = true
+								if CombatState.VisibleCheck and not CombatState.Autowall then
+									local rayParams = RaycastParams.new()
+									rayParams.FilterType = Enum.RaycastFilterType.Exclude
+									rayParams.FilterDescendantsInstances = { lp.Character, char }
+									local rayResult = Workspace:Raycast(camPos, partPos - camPos, rayParams)
+									if rayResult then
+										isVisible = false
 									end
 								end
 
-								if score < bestScore then
-									bestScore = score
-									bestTarget = player
-									bestPart = targetPart
+								if isVisible then
+									local score = screenDist
+									if CombatState.TargetPriority == "Lowest Distance" then
+										score = distToPlayer
+									elseif CombatState.TargetPriority == "Lowest Health" then
+										score = hum.Health
+									else
+										score = screenDist
+										if CombatState.PrioritizeLowHealth then
+											score = score * (hum.Health / math.max(hum.MaxHealth, 1))
+										end
+									end
+
+									if score < bestScore then
+										bestScore = score
+										bestTarget = player
+										bestPart = targetPart
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- 2. Scan NPCs / Bots (When TargetNPCs is enabled)
+	if CombatState.TargetNPCs then
+		for _, model in ipairs(Workspace:GetChildren()) do
+			if model:IsA("Model") and model ~= lp.Character and not Players:GetPlayerFromCharacter(model) then
+				local hum = model:FindFirstChildOfClass("Humanoid")
+				local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso") or model:FindFirstChild("Head")
+				local head = model:FindFirstChild("Head")
+				if hum and hum.Health > 0 and hrp then
+					local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+					local partPos = targetPart.Position
+					local distToNpc = (camPos - partPos).Magnitude
+
+					if distToNpc <= CombatState.MaxDistance then
+						local screenPos, onScreen = Camera:WorldToViewportPoint(partPos)
+						if onScreen then
+							local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+							if screenDist <= CombatState.FOVRadius then
+								local isVisible = true
+								if CombatState.VisibleCheck and not CombatState.Autowall then
+									local rayParams = RaycastParams.new()
+									rayParams.FilterType = Enum.RaycastFilterType.Exclude
+									rayParams.FilterDescendantsInstances = { lp.Character, model }
+									local rayResult = Workspace:Raycast(camPos, partPos - camPos, rayParams)
+									if rayResult then
+										isVisible = false
+									end
+								end
+
+								if isVisible then
+									local score = screenDist
+									if CombatState.TargetPriority == "Lowest Distance" then
+										score = distToNpc
+									elseif CombatState.TargetPriority == "Lowest Health" then
+										score = hum.Health
+									end
+
+									if score < bestScore then
+										bestScore = score
+										bestTarget = model
+										bestPart = targetPart
+									end
 								end
 							end
 						end
@@ -398,6 +460,7 @@ local function GetClosestTarget()
 
 	return bestTarget, bestPart
 end
+getgenv().GetClosestTarget = GetClosestTarget
 
 -- Triggerbot Engine (New Method - Raycast Target Interception)
 local lastTriggerShot = 0
@@ -956,12 +1019,24 @@ local CardAimbotTargetLeft = AimbotTab:CreateCard({
 CardAimbotTargetLeft:CreateToggle({
 	Name = "Target Players",
 	Default = true,
-	Callback = function(v) end,
+	Callback = function(v)
+		CombatState.TargetPlayers = v
+		if not v and CombatState.LockedPlayer then
+			CombatState.LockedPlayer = nil
+			CombatState.LockedTargetPart = nil
+		end
+	end,
 })
 CardAimbotTargetLeft:CreateToggle({
 	Name = "Target NPCs / Bots",
 	Default = false,
-	Callback = function(v) end,
+	Callback = function(v)
+		CombatState.TargetNPCs = v
+		if not v and CombatState.LockedPlayer and not Players:GetPlayerFromCharacter(CombatState.LockedPlayer) then
+			CombatState.LockedPlayer = nil
+			CombatState.LockedTargetPart = nil
+		end
+	end,
 })
 CardAimbotTargetLeft:CreateToggle({
 	Name = "Visible Raycast Check",
@@ -1147,7 +1222,15 @@ local VisualsState = {
 	-- Indicators
 	OffScreenArrows = false,
 	Tracers = false,
+	TracersColor = Color3.fromRGB(186, 145, 252),
 	Skeleton = false,
+	SkeletonColor = Color3.fromRGB(220, 220, 230),
+
+	-- Self Effects
+	SelfTrail = false,
+	SelfTrailColor = Color3.fromRGB(186, 145, 252),
+	SelfStepRings = false,
+	SelfStepColor = Color3.fromRGB(186, 145, 252),
 
 	-- Chams & Highlights
 	Chams = true,
@@ -1172,10 +1255,20 @@ local oldVisualsContainer = CoreGui:FindFirstChild("NVL_Visuals_Container")
 if oldVisualsContainer then
 	oldVisualsContainer:Destroy()
 end
+local oldLinesGui = CoreGui:FindFirstChild("NVL_ESP_Lines")
+if oldLinesGui then
+	oldLinesGui:Destroy()
+end
 
 local VisualsFolder = Instance.new("Folder")
 VisualsFolder.Name = "NVL_Visuals_Container"
 VisualsFolder.Parent = CoreGui
+
+local LinesGui = Instance.new("ScreenGui")
+LinesGui.Name = "NVL_ESP_Lines"
+LinesGui.ResetOnSpawn = false
+LinesGui.DisplayOrder = 10
+LinesGui.Parent = CoreGui
 
 local function GetHealthColor(pct)
 	if pct > 0.5 then
@@ -1198,6 +1291,8 @@ local function GetPlayerRelationColor(player, defaultColor)
 end
 
 local PlayerESPCache = {}
+local TracerLines = {}
+local SkeletonLines = {}
 
 local function CleanupPlayerESP(player)
 	local cache = PlayerESPCache[player]
@@ -1214,6 +1309,16 @@ local function CleanupPlayerESP(player)
 			cache.BillboardGui:Destroy()
 		end
 		PlayerESPCache[player] = nil
+	end
+	if TracerLines[player] then
+		pcall(function() TracerLines[player]:Destroy() end)
+		TracerLines[player] = nil
+	end
+	if SkeletonLines[player] then
+		for _, b in ipairs(SkeletonLines[player]) do
+			pcall(function() b:Destroy() end)
+		end
+		SkeletonLines[player] = nil
 	end
 end
 
@@ -1311,9 +1416,9 @@ local function CreateOrUpdatePlayerESP(player)
 	-- Health Bar Frame
 	local hpFrame = Instance.new("Frame")
 	hpFrame.Name = "HealthBar"
-	hpFrame.Size = UDim2.new(0, 3, 1, 0)
-	hpFrame.Position = UDim2.new(0, -7, 0, 0)
-	hpFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+	hpFrame.Size = UDim2.new(0, 4, 1, 0)
+	hpFrame.Position = UDim2.new(0, -9, 0, 0)
+	hpFrame.BackgroundColor3 = Color3.fromRGB(15, 16, 20)
 	hpFrame.BorderSizePixel = 0
 	hpFrame.Visible = VisualsState.HealthBar
 	hpFrame.Parent = bbg
@@ -1337,18 +1442,36 @@ local function CreateOrUpdatePlayerESP(player)
 
 	local hpText = Instance.new("TextLabel")
 	hpText.Name = "HealthText"
-	hpText.Size = UDim2.new(0, 20, 0, 12)
-	hpText.Position = UDim2.new(0, -22, 1 - pct, -6)
+	hpText.Size = UDim2.new(0, 36, 0, 14)
+	hpText.Position = UDim2.new(0, -48, 1 - pct, -7)
 	hpText.BackgroundTransparency = 1
 	hpText.Font = Enum.Font.GothamBold
-	hpText.TextSize = 9
-	hpText.TextColor3 = Color3.fromRGB(240, 240, 245)
-	hpText.TextStrokeTransparency = 0.5
+	hpText.TextSize = 10
+	hpText.TextColor3 = Color3.fromRGB(245, 245, 250)
+	hpText.TextStrokeTransparency = 0.3
 	hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	hpText.TextXAlignment = Enum.TextXAlignment.Right
 	hpText.Text = tostring(math.floor(curHealth))
 	hpText.Visible = VisualsState.HealthBar and VisualsState.HealthText
 	hpText.Parent = bbg
+
+	-- Distance Label (Meters under box)
+	local distLbl = Instance.new("TextLabel")
+	distLbl.Name = "DistanceLabel"
+	distLbl.Size = UDim2.new(0, 200, 0, 14)
+	distLbl.Position = UDim2.new(0.5, 0, 1, 18)
+	distLbl.AnchorPoint = Vector2.new(0.5, 0)
+	distLbl.BackgroundTransparency = 1
+	distLbl.Font = Enum.Font.GothamMedium
+	distLbl.TextSize = 9
+	distLbl.TextColor3 = Color3.fromRGB(180, 185, 200)
+	distLbl.TextStrokeTransparency = 0.5
+	distLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	local initCamPos = Camera and Camera.CFrame.Position or Vector3.zero
+	local initDist = (hrp.Position - initCamPos).Magnitude
+	distLbl.Text = string.format("[%dm]", math.floor(initDist))
+	distLbl.Visible = VisualsState.Distance
+	distLbl.Parent = bbg
 
 	-- Weapon Label
 	local weaponLbl = Instance.new("TextLabel")
@@ -1380,7 +1503,7 @@ local function CreateOrUpdatePlayerESP(player)
 		hpFill.BackgroundColor3 = GetHealthColor(newPct)
 
 		hpText.Text = tostring(math.floor(newCur))
-		hpText.Position = UDim2.new(0, -22, 1 - newPct, -6)
+		hpText.Position = UDim2.new(0, -48, 1 - newPct, -7)
 
 		if newCur <= 0 then
 			hl.Enabled = false
@@ -1427,6 +1550,7 @@ local function CreateOrUpdatePlayerESP(player)
 		HealthBarFrame = hpFrame,
 		HealthFill = hpFill,
 		HealthText = hpText,
+		DistanceLabel = distLbl,
 		WeaponLabel = weaponLbl,
 		Connections = connections,
 	}
@@ -1504,6 +1628,11 @@ local function RefreshAllESP()
 				data.HealthText.Visible = VisualsState.HealthBar and VisualsState.HealthText
 			end
 
+			-- Distance
+			if data.DistanceLabel and data.DistanceLabel.Parent then
+				data.DistanceLabel.Visible = VisualsState.Distance
+			end
+
 			-- Weapon
 			if data.WeaponLabel and data.WeaponLabel.Parent then
 				data.WeaponLabel.Visible = VisualsState.EquippedWeapon
@@ -1555,17 +1684,459 @@ task.spawn(function()
 							data.NameLabel.Text = player.DisplayName
 						end
 					end
+
+					if data.DistanceLabel and data.DistanceLabel.Parent and lpPos and data.Hrp and data.Hrp.Parent then
+						local dist = (data.Hrp.Position - lpPos).Magnitude
+						data.DistanceLabel.Text = string.format("[%dm]", math.floor(dist))
+					end
 				end
 			end
 		end
 	end
 end)
 
+-- ========================================================================
+-- Tracers & Skeleton ESP Engine (Pure Native GPU Frames - 0 FPS Impact)
+-- ========================================================================
+local function GetOrCreateTracerLine(player)
+	if not TracerLines[player] then
+		local line = Instance.new("Frame")
+		line.Name = player.Name .. "_Tracer"
+		line.BackgroundColor3 = VisualsState.TracersColor
+		line.BorderSizePixel = 0
+		line.Visible = false
+		line.ZIndex = 5
+		line.Parent = LinesGui
+		TracerLines[player] = line
+	end
+	return TracerLines[player]
+end
+
+local function GetOrCreateSkeletonLines(player)
+	if not SkeletonLines[player] then
+		local bones = {}
+		for i = 1, 15 do
+			local line = Instance.new("Frame")
+			line.Name = player.Name .. "_Bone_" .. i
+			line.BackgroundColor3 = VisualsState.SkeletonColor
+			line.BorderSizePixel = 0
+			line.Visible = false
+			line.ZIndex = 5
+			line.Parent = LinesGui
+			table.insert(bones, line)
+		end
+		SkeletonLines[player] = bones
+	end
+	return SkeletonLines[player]
+end
+
+NVL_Connect(RunService.RenderStepped, function()
+	if not VisualsState.Enabled then
+		for _, l in pairs(TracerLines) do l.Visible = false end
+		for _, bones in pairs(SkeletonLines) do
+			for _, b in ipairs(bones) do b.Visible = false end
+		end
+		return
+	end
+
+	local screenBottom = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+	local camPos = Camera.CFrame.Position
+
+	-- 1. Tracers (Snaplines from bottom center of screen)
+	if VisualsState.Tracers then
+		for player, data in pairs(PlayerESPCache) do
+			local line = GetOrCreateTracerLine(player)
+			local hrp = data.Hrp
+			local hum = data.Hum
+			if hrp and hrp.Parent and hum and hum.Health > 0 then
+				local dist = (camPos - hrp.Position).Magnitude
+				if dist <= VisualsState.RenderDistance then
+					local sPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+					if onScreen then
+						local p2 = Vector2.new(sPos.X, sPos.Y)
+						local diff = p2 - screenBottom
+						local len = diff.Magnitude
+						line.Size = UDim2.new(0, len, 0, 1.5)
+						line.Position = UDim2.new(0, (screenBottom.X + p2.X) / 2, 0, (screenBottom.Y + p2.Y) / 2)
+						line.AnchorPoint = Vector2.new(0.5, 0.5)
+						line.Rotation = math.deg(math.atan2(diff.Y, diff.X))
+						line.BackgroundColor3 = GetPlayerRelationColor(player, VisualsState.TracersColor)
+						line.Visible = true
+					else
+						line.Visible = false
+					end
+				else
+					line.Visible = false
+				end
+			else
+				line.Visible = false
+			end
+		end
+	else
+		for _, l in pairs(TracerLines) do l.Visible = false end
+	end
+
+	-- 2. Skeleton ESP (Bones between joints)
+	if VisualsState.Skeleton then
+		for player, data in pairs(PlayerESPCache) do
+			local bones = GetOrCreateSkeletonLines(player)
+			local char = data.Character
+			local hum = data.Hum
+			if char and char.Parent and hum and hum.Health > 0 then
+				local bIdx = 1
+				local function DrawBone(pName1, pName2)
+					local p1 = char:FindFirstChild(pName1)
+					local p2 = char:FindFirstChild(pName2)
+					if p1 and p2 then
+						local sPos1, on1 = Camera:WorldToViewportPoint(p1.Position)
+						local sPos2, on2 = Camera:WorldToViewportPoint(p2.Position)
+						if on1 and on2 then
+							local v1 = Vector2.new(sPos1.X, sPos1.Y)
+							local v2 = Vector2.new(sPos2.X, sPos2.Y)
+							local diff = v2 - v1
+							local len = diff.Magnitude
+							local boneFrame = bones[bIdx]
+							if boneFrame then
+								boneFrame.Size = UDim2.new(0, len, 0, 1.5)
+								boneFrame.Position = UDim2.new(0, (v1.X + v2.X) / 2, 0, (v1.Y + v2.Y) / 2)
+								boneFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+								boneFrame.Rotation = math.deg(math.atan2(diff.Y, diff.X))
+								boneFrame.BackgroundColor3 = VisualsState.SkeletonColor
+								boneFrame.Visible = true
+								bIdx = bIdx + 1
+							end
+						end
+					end
+				end
+
+				if char:FindFirstChild("UpperTorso") then
+					-- R15 Rig
+					DrawBone("Head", "UpperTorso")
+					DrawBone("UpperTorso", "LowerTorso")
+					DrawBone("UpperTorso", "LeftUpperArm")
+					DrawBone("LeftUpperArm", "LeftLowerArm")
+					DrawBone("LeftLowerArm", "LeftHand")
+					DrawBone("UpperTorso", "RightUpperArm")
+					DrawBone("RightUpperArm", "RightLowerArm")
+					DrawBone("RightLowerArm", "RightHand")
+					DrawBone("LowerTorso", "LeftUpperLeg")
+					DrawBone("LeftUpperLeg", "LeftLowerLeg")
+					DrawBone("LeftLowerLeg", "LeftFoot")
+					DrawBone("LowerTorso", "RightUpperLeg")
+					DrawBone("RightUpperLeg", "RightLowerLeg")
+					DrawBone("RightLowerLeg", "RightFoot")
+				elseif char:FindFirstChild("Torso") then
+					-- R6 Rig
+					DrawBone("Head", "Torso")
+					DrawBone("Torso", "Left Arm")
+					DrawBone("Torso", "Right Arm")
+					DrawBone("Torso", "Left Leg")
+					DrawBone("Torso", "Right Leg")
+				end
+
+				for i = bIdx, #bones do
+					bones[i].Visible = false
+				end
+			else
+				for _, b in ipairs(bones) do b.Visible = false end
+			end
+		end
+	else
+		for _, bones in pairs(SkeletonLines) do
+			for _, b in ipairs(bones) do b.Visible = false end
+		end
+	end
+end)
+
+-- ========================================================================
+-- Self Effects Engine (Local Player Trails & Footstep Pulse Rings)
+-- ========================================================================
+local ActiveSelfTrail = nil
+local ActiveSelfAttachments = {}
+local function UpdateSelfTrail()
+	if ActiveSelfTrail then
+		pcall(function() ActiveSelfTrail:Destroy() end)
+		ActiveSelfTrail = nil
+	end
+	for _, att in ipairs(ActiveSelfAttachments) do
+		pcall(function() att:Destroy() end)
+	end
+	ActiveSelfAttachments = {}
+
+	if not VisualsState.SelfTrail then return end
+	local char = lp.Character
+	local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+	if not hrp then return end
+
+	local att0 = Instance.new("Attachment", hrp)
+	att0.Position = Vector3.new(0, 1.2, 0)
+	local att1 = Instance.new("Attachment", hrp)
+	att1.Position = Vector3.new(0, -1.2, 0)
+	table.insert(ActiveSelfAttachments, att0)
+	table.insert(ActiveSelfAttachments, att1)
+
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = att0
+	trail.Attachment1 = att1
+	trail.Lifetime = 0.55
+	trail.MinLength = 0.1
+	trail.FaceCamera = true
+	trail.Color = ColorSequence.new(VisualsState.SelfTrailColor)
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.Parent = hrp
+	ActiveSelfTrail = trail
+end
+
+lp.CharacterAdded:Connect(function()
+	task.delay(0.3, function()
+		if VisualsState.SelfTrail then
+			UpdateSelfTrail()
+		end
+	end)
+end)
+
+local lastStepPulse = 0
+NVL_Connect(RunService.Heartbeat, function()
+	if not VisualsState.SelfStepRings then return end
+	local char = lp.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hum or not hrp or hum.Health <= 0 then return end
+
+	if hum.MoveDirection.Magnitude > 0.1 and hum.FloorMaterial ~= Enum.Material.Air then
+		local now = tick()
+		if now - lastStepPulse >= 0.18 then
+			lastStepPulse = now
+			task.spawn(function()
+				local ring = Instance.new("Part")
+				ring.Shape = Enum.PartType.Cylinder
+				ring.Size = Vector3.new(0.04, 1, 1)
+				ring.CFrame = CFrame.new(hrp.Position - Vector3.new(0, 2.7, 0)) * CFrame.Angles(0, 0, math.rad(90))
+				ring.Material = Enum.Material.Neon
+				ring.Color = VisualsState.SelfStepColor
+				ring.Transparency = 0.2
+				ring.CanCollide = false
+				ring.Anchored = true
+				ring.CastShadow = false
+				ring.Parent = Workspace
+
+				local tw = TweenService:Create(ring, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Size = Vector3.new(0.04, 4.2, 4.2),
+					Transparency = 1,
+				})
+				tw:Play()
+				tw.Completed:Connect(function()
+					ring:Destroy()
+				end)
+			end)
+		end
+	end
+end)
+
+-- ========================================================================
+-- Mod Skin & Morph Engine (Universal Client-Side Morph - 100% Offline/Online)
+-- ========================================================================
+local get_obj = getobjects or (game and function(url) return game:GetObjects(url) end)
+local OriginalAvatarState = nil
+
+local function SnapshotOriginalAvatar()
+	if OriginalAvatarState or not lp.Character then return end
+	local char = lp.Character
+	local bc = char:FindFirstChildOfClass("BodyColors")
+	local shirt = char:FindFirstChildOfClass("Shirt")
+	local pants = char:FindFirstChildOfClass("Pants")
+	local origAccs = {}
+	for _, acc in ipairs(char:GetChildren()) do
+		if acc:IsA("Accessory") then
+			table.insert(origAccs, acc:Clone())
+		end
+	end
+	OriginalAvatarState = {
+		HeadColor = bc and bc.HeadColor3,
+		TorsoColor = bc and bc.TorsoColor3,
+		LeftArmColor = bc and bc.LeftArmColor3,
+		RightArmColor = bc and bc.RightArmColor3,
+		LeftLegColor = bc and bc.LeftLegColor3,
+		RightLegColor = bc and bc.RightLegColor3,
+		Shirt = shirt and shirt.ShirtTemplate or "",
+		Pants = pants and pants.PantsTemplate or "",
+		Accessories = origAccs,
+	}
+end
+
+local function WeldAccessoryToCharacter(acc, char)
+	local handle = acc:FindFirstChild("Handle")
+	if not handle then return false end
+	handle.CanCollide = false
+	local accAtt = handle:FindFirstChildOfClass("Attachment")
+	if accAtt then
+		for _, part in ipairs(char:GetChildren()) do
+			if part:IsA("BasePart") then
+				local charAtt = part:FindFirstChild(accAtt.Name)
+				if charAtt then
+					local weld = Instance.new("Weld")
+					weld.Name = "AccessoryWeld"
+					weld.Part0 = handle
+					weld.Part1 = part
+					weld.C0 = accAtt.CFrame
+					weld.C1 = charAtt.CFrame
+					weld.Parent = handle
+					acc.Parent = char
+					return true
+				end
+			end
+		end
+	end
+	local head = char:FindFirstChild("Head")
+	if head then
+		local weld = Instance.new("Weld")
+		weld.Name = "AccessoryWeld"
+		weld.Part0 = handle
+		weld.Part1 = head
+		weld.C0 = CFrame.new(0, 0.5, 0)
+		weld.Parent = handle
+		acc.Parent = char
+		return true
+	end
+	return false
+end
+
+local SelectedSkinUserId = "10442891740"
+local CustomSkinUserId = ""
+
+local function ApplySkinById(userIdStr)
+	local numId = tonumber(userIdStr)
+	if not numId or numId <= 0 then return end
+	local char = lp.Character
+	if not char or not char.Parent then return end
+	SnapshotOriginalAvatar()
+
+	task.spawn(function()
+		local success, desc = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserId(numId)
+		end)
+		if not success or not desc then
+			warn("[NVL-Win] Failed to get HumanoidDescription for UserId:", numId)
+			return
+		end
+
+		-- 1. Remove existing accessories
+		for _, item in ipairs(char:GetChildren()) do
+			if item:IsA("Accessory") then
+				pcall(function() item:Destroy() end)
+			end
+		end
+
+		-- 2. Apply Clothes
+		if desc.Shirt and desc.Shirt > 0 then
+			local shirt = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
+			shirt.ShirtTemplate = "rbxassetid://" .. desc.Shirt
+		end
+		if desc.Pants and desc.Pants > 0 then
+			local pants = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
+			pants.PantsTemplate = "rbxassetid://" .. desc.Pants
+		end
+
+		-- 3. Apply Colors
+		local bc = char:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", char)
+		if desc.HeadColor then bc.HeadColor3 = desc.HeadColor end
+		if desc.TorsoColor then bc.TorsoColor3 = desc.TorsoColor end
+		if desc.LeftArmColor then bc.LeftArmColor3 = desc.LeftArmColor end
+		if desc.RightArmColor then bc.RightArmColor3 = desc.RightArmColor end
+		if desc.LeftLegColor then bc.LeftLegColor3 = desc.LeftLegColor end
+		if desc.RightLegColor then bc.RightLegColor3 = desc.RightLegColor end
+		for _, p in ipairs(char:GetChildren()) do
+			if p:IsA("BasePart") then
+				if p.Name:find("Head") then p.Color = bc.HeadColor3
+				elseif p.Name:find("Torso") then p.Color = bc.TorsoColor3
+				elseif p.Name:find("Arm") or p.Name:find("Hand") then
+					p.Color = p.Name:find("Left") and bc.LeftArmColor3 or bc.RightArmColor3
+				elseif p.Name:find("Leg") or p.Name:find("Foot") then
+					p.Color = p.Name:find("Left") and bc.LeftLegColor3 or bc.RightLegColor3
+				end
+			end
+		end
+
+		-- 4. Load & Weld Accessories
+		local accList = {}
+		pcall(function() accList = desc:GetAccessories(true) end)
+		for _, a in ipairs(accList) do
+			if a.AssetId and a.AssetId > 0 and get_obj then
+				task.spawn(function()
+					local ok, res = pcall(function()
+						return get_obj("rbxassetid://" .. a.AssetId)
+					end)
+					if ok and res and res[1] and res[1]:IsA("Accessory") then
+						WeldAccessoryToCharacter(res[1], char)
+					end
+				end)
+			end
+		end
+
+		print("[NVL-Win] Successfully applied client-side Mod Skin for UserId:", numId)
+	end)
+end
+
+local function ResetOriginalSkin()
+	local char = lp.Character
+	if not char or not OriginalAvatarState then return end
+
+	-- Remove custom accessories
+	for _, item in ipairs(char:GetChildren()) do
+		if item:IsA("Accessory") then
+			pcall(function() item:Destroy() end)
+		end
+	end
+
+	-- Restore clothes
+	local shirt = char:FindFirstChildOfClass("Shirt")
+	if shirt then
+		if OriginalAvatarState.Shirt ~= "" then
+			shirt.ShirtTemplate = OriginalAvatarState.Shirt
+		else
+			shirt:Destroy()
+		end
+	end
+	local pants = char:FindFirstChildOfClass("Pants")
+	if pants then
+		if OriginalAvatarState.Pants ~= "" then
+			pants.PantsTemplate = OriginalAvatarState.Pants
+		else
+			pants:Destroy()
+		end
+	end
+
+	-- Restore Colors
+	local bc = char:FindFirstChildOfClass("BodyColors")
+	if bc and OriginalAvatarState.HeadColor then
+		bc.HeadColor3 = OriginalAvatarState.HeadColor
+		bc.TorsoColor3 = OriginalAvatarState.TorsoColor
+		bc.LeftArmColor3 = OriginalAvatarState.LeftArmColor
+		bc.RightArmColor3 = OriginalAvatarState.RightArmColor
+		bc.LeftLegColor3 = OriginalAvatarState.LeftLegColor
+		bc.RightLegColor3 = OriginalAvatarState.RightLegColor
+	end
+
+	-- Restore Original Accessories
+	for _, acc in ipairs(OriginalAvatarState.Accessories) do
+		if acc then
+			local clone = acc:Clone()
+			WeldAccessoryToCharacter(clone, char)
+		end
+	end
+
+	print("[NVL-Win] Reset to Original Avatar Skin.")
+end
+
 -- Left Column: Card 1 - ESP Main
 local VisualsMainCard = PlayersTab:CreateCard({
 	Title = "ESP Main",
 	Side = "left",
 	Icon = MemoryAssets.Icons.sliders or "",
+	SubTab = "Enemies",
 })
 VisualsMainCard:CreateToggle({
 	Name = "Boxes",
@@ -1617,6 +2188,7 @@ local PlayerInfoCard = PlayersTab:CreateCard({
 	Title = "Player Info",
 	Side = "left",
 	Icon = MemoryAssets.Icons.user_filled or "",
+	SubTab = "Enemies",
 })
 PlayerInfoCard:CreateToggle({
 	Name = "Name Tags",
@@ -1678,6 +2250,7 @@ local IndicatorsCard = PlayersTab:CreateCard({
 	Title = "Indicators",
 	Side = "left",
 	Icon = MemoryAssets.Icons.target_fill or "",
+	SubTab = "Enemies",
 })
 IndicatorsCard:CreateToggle({
 	Name = "Off-Screen Arrows",
@@ -1690,15 +2263,25 @@ IndicatorsCard:CreateToggle({
 	Name = "Tracers",
 	Default = false,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(186, 145, 252),
-	Callback = function(v) print("[NVL-Win] Tracers:", v) end,
+	ColorValue = VisualsState.TracersColor,
+	Callback = function(v)
+		VisualsState.Tracers = v
+	end,
+	ColorCallback = function(c)
+		VisualsState.TracersColor = c
+	end,
 })
 IndicatorsCard:CreateToggle({
 	Name = "Skeleton",
 	Default = false,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(220, 220, 230),
-	Callback = function(v) print("[NVL-Win] Skeleton:", v) end,
+	ColorValue = VisualsState.SkeletonColor,
+	Callback = function(v)
+		VisualsState.Skeleton = v
+	end,
+	ColorCallback = function(c)
+		VisualsState.SkeletonColor = c
+	end,
 })
 
 -- Right Column: Card 1 - Chams & Highlights
@@ -1706,6 +2289,7 @@ local VisualsChamsCard = PlayersTab:CreateCard({
 	Title = "Chams & Highlights",
 	Side = "right",
 	Icon = MemoryAssets.Icons.view_filled or "",
+	SubTab = "Enemies",
 })
 VisualsChamsCard:CreateToggle({
 	Name = "Highlight Chams",
@@ -1757,6 +2341,7 @@ local VisualsEffectsCard = PlayersTab:CreateCard({
 	Title = "Visual Effects",
 	Side = "right",
 	Icon = MemoryAssets.Icons.dots_2 or "",
+	SubTab = "Enemies",
 })
 VisualsEffectsCard:CreateToggle({
 	Name = "Hit FX",
@@ -1783,6 +2368,7 @@ local VisualsSettingsCard = PlayersTab:CreateCard({
 	Title = "Visual Settings",
 	Side = "right",
 	Icon = MemoryAssets.Icons.settings_bold or "",
+	SubTab = "Enemies",
 })
 VisualsSettingsCard:CreateSlider({
 	Name = "Render Distance",
@@ -1811,6 +2397,89 @@ VisualsSettingsCard:CreateColorPicker({
 	Default = Color3.fromRGB(186, 145, 252),
 	Callback = function(c)
 		VisualsState.AccentColor = c
+	end,
+})
+
+-- ========================================================================
+-- SubTab: Self Cards (Self Effects & Mod Skin)
+-- ========================================================================
+local CardSelfEffects = PlayersTab:CreateCard({
+	Title = "Self Effects",
+	Side = "left",
+	Icon = MemoryAssets.Icons.dots_2 or "",
+	SubTab = "Self",
+})
+CardSelfEffects:CreateToggle({
+	Name = "Character Trail",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = VisualsState.SelfTrailColor,
+	Callback = function(v)
+		VisualsState.SelfTrail = v
+		UpdateSelfTrail()
+	end,
+	ColorCallback = function(c)
+		VisualsState.SelfTrailColor = c
+		UpdateSelfTrail()
+	end,
+})
+CardSelfEffects:CreateToggle({
+	Name = "Footstep Rings",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = VisualsState.SelfStepColor,
+	Callback = function(v)
+		VisualsState.SelfStepRings = v
+	end,
+	ColorCallback = function(c)
+		VisualsState.SelfStepColor = c
+	end,
+})
+
+local CardModSkin = PlayersTab:CreateCard({
+	Title = "Custom Skin & Morph",
+	Side = "right",
+	Icon = MemoryAssets.Icons.users or "",
+	SubTab = "Self",
+})
+CardModSkin:CreateDropdown({
+	Name = "Preset Outfits",
+	Options = {
+		"10442891740 - Kasumi AFK",
+		"1046787815 - Uninspired",
+		"10523593859 - Miru",
+		"10536288229 - Aiponn",
+		"10639617194 - Chicken Comel",
+		"10708887824 - Mayuri Shark",
+		"10915292293 - Tuithichban Y2K",
+		"1103193770 - Tessy Korblox",
+		"3633336385 - Nicholas Rikka",
+	},
+	Default = "10442891740 - Kasumi AFK",
+	Callback = function(opt)
+		local extractedId = string.match(opt, "^(%d+)")
+		if extractedId then
+			SelectedSkinUserId = extractedId
+		end
+	end,
+})
+CardModSkin:CreateInput({
+	Placeholder = "Custom User ID (e.g. 10442891740)",
+	Callback = function(text)
+		CustomSkinUserId = text
+	end,
+})
+CardModSkin:CreateButton({
+	Name = "Apply Selected Skin",
+	Callback = function()
+		local targetId = (CustomSkinUserId ~= "" and CustomSkinUserId) or SelectedSkinUserId
+		ApplySkinById(targetId)
+	end,
+})
+CardModSkin:CreateButton({
+	Name = "Reset Original Skin",
+	Callback = function()
+		ResetOriginalSkin()
 	end,
 })
 
@@ -1889,7 +2558,7 @@ NVL_Connect(RunService.Heartbeat, function(dt)
 	end
 end)
 
--- Fly Controller (CFrame and Velocity modes)
+-- Fly Controller (CFrame and Velocity modes - Keeps natural falling animation without locking character)
 NVL_Connect(RunService.RenderStepped, function(dt)
 	if not MovementState.FlyEnabled then return end
 	local char = lp.Character
@@ -1897,7 +2566,9 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	if not hrp or not hum or hum.Health <= 0 then return end
 
-	hum.PlatformStand = true
+	-- Maintain natural Freefall animation state without PlatformStand rigidity
+	hum.PlatformStand = false
+	hum:ChangeState(Enum.HumanoidStateType.Freefall)
 
 	local camCF = Workspace.CurrentCamera.CFrame
 	local moveDir = Vector3.zero
@@ -2043,7 +2714,10 @@ CardFlight:CreateToggle({
 		local char = lp.Character
 		if not v and char then
 			local hum = char:FindFirstChildOfClass("Humanoid")
-			if hum then hum.PlatformStand = false end
+			if hum then
+				hum.PlatformStand = false
+				hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+			end
 			local hrp = char:FindFirstChild("HumanoidRootPart")
 			if hrp then hrp.AssemblyLinearVelocity = Vector3.zero end
 		end
