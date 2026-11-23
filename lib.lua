@@ -2838,6 +2838,7 @@ function MemoryUI:CreateWindow(config)
 				local callback = sliderConfig.Callback or function() end
 
 				local currentValue = math.clamp(defaultVal, minVal, maxVal)
+				local originalVal = defaultVal
 
 				local Row = Create("Frame", {
 					Name = "Slider_" .. sliderName,
@@ -2865,7 +2866,7 @@ function MemoryUI:CreateWindow(config)
 				local SliderHitbox = Create("TextButton", {
 					Name = "SliderHitbox",
 					Parent = Row,
-					Size = UDim2.new(1, -170, 0, 32),
+					Size = UDim2.new(1, -192, 0, 32),
 					Position = UDim2.new(0, 95, 0.5, -16),
 					BackgroundTransparency = 1,
 					Text = "",
@@ -2930,8 +2931,8 @@ function MemoryUI:CreateWindow(config)
 				-- Editable Number Value Box on Right
 				local ValueBox = Create("Frame", {
 					Parent = Row,
-					Size = UDim2.new(0, 56, 0, 24),
-					Position = UDim2.new(1, -68, 0.5, -12),
+					Size = UDim2.new(0, 52, 0, 24),
+					Position = UDim2.new(1, -88, 0.5, -12),
 					BackgroundColor3 = Color3.fromRGB(14, 15, 17),
 					BorderSizePixel = 0,
 					ClipsDescendants = true,
@@ -2957,6 +2958,40 @@ function MemoryUI:CreateWindow(config)
 
 				ValueInput.Focused:Connect(function()
 					Tween(ValueBoxStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
+				end)
+
+				-- Reset Button (↺) to restore original default value
+				local ResetBtn = Create("TextButton", {
+					Name = "ResetBtn",
+					Parent = Row,
+					Size = UDim2.new(0, 22, 0, 22),
+					Position = UDim2.new(1, -30, 0.5, -11),
+					BackgroundColor3 = Color3.fromRGB(18, 20, 24),
+					BorderSizePixel = 0,
+					Font = Enum.Font.GothamBold,
+					Text = "↺",
+					TextColor3 = Color3.fromRGB(140, 145, 160),
+					TextSize = 13,
+					AutoButtonColor = false,
+					ZIndex = 6,
+				})
+				Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = ResetBtn })
+				local ResetStroke = Create("UIStroke", {
+					Parent = ResetBtn,
+					Color = Color3.fromRGB(30, 34, 42),
+					Thickness = 1,
+				})
+
+				ResetBtn.MouseEnter:Connect(function()
+					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(26, 29, 38) })
+					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
+					Tween(ResetBtn, TweenInfo.new(0.18), { TextColor3 = Theme.TextWhite })
+				end)
+
+				ResetBtn.MouseLeave:Connect(function()
+					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(18, 20, 24) })
+					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Color3.fromRGB(30, 34, 42) })
+					Tween(ResetBtn, TweenInfo.new(0.18), { TextColor3 = Color3.fromRGB(140, 145, 160) })
 				end)
 
 				-- Snow Particle Effect
@@ -3046,6 +3081,27 @@ function MemoryUI:CreateWindow(config)
 					pcall(callback, currentValue)
 				end
 
+				local isResetting = false
+				ResetBtn.MouseButton1Click:Connect(function()
+					if isResetting then return end
+					isResetting = true
+
+					-- 360-degree smooth spin animation and color flash
+					ResetBtn.Rotation = 0
+					Tween(ResetBtn, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Rotation = -360 })
+					Tween(ResetStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(80, 220, 120) })
+
+					currentValue = originalVal
+					ValueInput.Text = string.format("%." .. decimals .. "f", currentValue)
+					UpdateSlider(0, true)
+
+					task.delay(0.36, function()
+						ResetBtn.Rotation = 0
+						Tween(ResetStroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(30, 34, 42) })
+						isResetting = false
+					end)
+				end)
+
 				ValueInput.FocusLost:Connect(function()
 					Tween(ValueBoxStroke, TweenInfo.new(0.18), { Color = Color3.fromRGB(20, 23, 28) })
 					local num = tonumber(ValueInput.Text)
@@ -3091,6 +3147,11 @@ function MemoryUI:CreateWindow(config)
 						UpdateSlider(0, true)
 					end,
 					Get = function() return currentValue end,
+					Reset = function()
+						currentValue = originalVal
+						ValueInput.Text = string.format("%." .. decimals .. "f", currentValue)
+						UpdateSlider(0, true)
+					end,
 				}
 
 				local flagKey = sliderConfig.Flag or sliderName
@@ -3098,6 +3159,7 @@ function MemoryUI:CreateWindow(config)
 					Type = "Slider",
 					Get = sliderObj.Get,
 					Set = sliderObj.Set,
+					Reset = sliderObj.Reset,
 				}
 
 				return sliderObj

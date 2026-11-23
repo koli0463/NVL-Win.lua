@@ -91,6 +91,7 @@ end)
 if not MemoryUI then
 	error("[NVL-Win] Could not load lib.lua!")
 end
+getgenv().MemoryUI = MemoryUI
 
 -- ========================================================================
 -- Initialize Main Window (Neverlose / Memory UI)
@@ -231,11 +232,13 @@ local CombatState = {
 	TriggerbotRange = 350,
 	TargetLock = false,
 	TargetLockSmoothness = 0.25,
-	TargetPriority = "Closest to Crosshair",
+	TargetPriority = "Target",
 	NoSpread = false,
 	NoRecoil = false,
 	FastCooldown = false,
 	AutoReload = false,
+	LockedPlayer = nil,
+	LockedTargetPart = nil,
 }
 
 local CurrentTarget = nil
@@ -308,6 +311,23 @@ end
 -- Target Selection (New Method: Priority scoring + wall check)
 local function GetClosestTarget()
 	if not CombatState.Enabled then return nil, nil end
+
+	-- If Target priority is active and we have a valid locked player, stick with them
+	if CombatState.TargetPriority == "Target" and CombatState.LockedPlayer then
+		local p = CombatState.LockedPlayer
+		local char = p and p.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local head = char and char:FindFirstChild("Head")
+		if p and p.Parent and char and hum and hum.Health > 0 and (hrp or head) then
+			local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+			return p, targetPart
+		else
+			CombatState.LockedPlayer = nil
+			CombatState.LockedTargetPart = nil
+		end
+	end
+
 	local mousePos = UserInputService:GetMouseLocation()
 	local bestTarget = nil
 	local bestPart = nil
@@ -351,9 +371,18 @@ local function GetClosestTarget()
 
 							if isVisible then
 								local score = screenDist
-								if CombatState.PrioritizeLowHealth then
-									score = score * (hum.Health / math.max(hum.MaxHealth, 1))
+								if CombatState.TargetPriority == "Lowest Distance" then
+									score = distToPlayer
+								elseif CombatState.TargetPriority == "Lowest Health" then
+									score = hum.Health
+								else
+									-- "Closest to Crosshair" or "Target" default fallback
+									score = screenDist
+									if CombatState.PrioritizeLowHealth then
+										score = score * (hum.Health / math.max(hum.MaxHealth, 1))
+									end
 								end
+
 								if score < bestScore then
 									bestScore = score
 									bestTarget = player
@@ -411,7 +440,26 @@ end
 -- Update Loop for Combat (RenderStepped)
 NVL_Connect(RunService.RenderStepped, function(dt)
 	UpdateFOVCircle()
-	CurrentTarget, CurrentTargetPart = GetClosestTarget()
+
+	-- If Target Lock is active and we have a LockedPlayer, persistently track them
+	if CombatState.TargetLock and CombatState.LockedPlayer then
+		local p = CombatState.LockedPlayer
+		local char = p and p.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local head = char and char:FindFirstChild("Head")
+		if p and p.Parent and char and hum and hum.Health > 0 and (hrp or head) then
+			local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+			CurrentTarget = p
+			CurrentTargetPart = targetPart
+		else
+			CombatState.LockedPlayer = nil
+			CombatState.LockedTargetPart = nil
+			CurrentTarget, CurrentTargetPart = GetClosestTarget()
+		end
+	else
+		CurrentTarget, CurrentTargetPart = GetClosestTarget()
+	end
 
 	-- Auto Fire
 	if CombatState.Enabled and CombatState.AutoFire and CurrentTarget and CurrentTargetPart then
@@ -424,12 +472,13 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 
 	-- Sticky Aim / Target Lock (Smooth Camera Tracking)
 	if CombatState.Enabled and CombatState.TargetLock and CurrentTargetPart and Camera then
-		local targetScreen, onScreen = Camera:WorldToViewportPoint(CurrentTargetPart.Position)
-		if onScreen then
-			local curCF = Camera.CFrame
-			local targetCF = CFrame.new(curCF.Position, CurrentTargetPart.Position)
-			Camera.CFrame = curCF:Lerp(targetCF, math.clamp(CombatState.TargetLockSmoothness, 0.05, 1))
+		local curCF = Camera.CFrame
+		local aimPos = CurrentTargetPart.Position
+		if CombatState.Prediction and CombatState.Prediction > 0 and CurrentTargetPart.AssemblyLinearVelocity then
+			aimPos = aimPos + (CurrentTargetPart.AssemblyLinearVelocity * CombatState.Prediction)
 		end
+		local targetCF = CFrame.new(curCF.Position, aimPos)
+		Camera.CFrame = curCF:Lerp(targetCF, math.clamp(CombatState.TargetLockSmoothness, 0.05, 1))
 	end
 
 	-- Triggerbot
@@ -548,7 +597,6 @@ CardGeneral:CreateToggle({
 	Name = "Draw FOV",
 	Default = true,
 	HasSettings = true,
-	Keybind = Enum.KeyCode.X,
 	ColorBadge = true,
 	ColorValue = CombatState.FOVColor,
 	Callback = function(v)
@@ -837,11 +885,21 @@ CardAimbotMainLeft:CreateToggle({
 	Name = "Target Lock",
 	Default = false,
 	HasSettings = true,
-	Keybind = Enum.KeyCode.E,
+	Keybind = Enum.KeyCode.T,
 	Mode = "Hold",
 	ShowInBinds = true,
 	Callback = function(v)
 		CombatState.TargetLock = v
+		if v then
+			local target, part = GetClosestTarget()
+			if target then
+				CombatState.LockedPlayer = target
+				CombatState.LockedTargetPart = part
+			end
+		else
+			CombatState.LockedPlayer = nil
+			CombatState.LockedTargetPart = nil
+		end
 	end,
 })
 CardAimbotMainLeft:CreateSlider({
@@ -870,8 +928,8 @@ local CardAimbotMainRight = AimbotTab:CreateCard({
 })
 CardAimbotMainRight:CreateDropdown({
 	Name = "Target Priority",
-	Options = { "Closest to Crosshair", "Lowest Health", "Lowest Distance" },
-	Default = "Closest to Crosshair",
+	Options = { "Target", "Closest to Crosshair", "Lowest Health", "Lowest Distance" },
+	Default = "Target",
 	Callback = function(opt)
 		CombatState.TargetPriority = opt
 	end,
@@ -990,7 +1048,7 @@ CardTrigMain:CreateToggle({
 	Name = "Enable Triggerbot",
 	Default = false,
 	HasSettings = true,
-	Keybind = Enum.KeyCode.T,
+	Keybind = Enum.KeyCode.G,
 	Mode = "Toggle",
 	ShowInBinds = true,
 	Callback = function(v)
@@ -1757,13 +1815,15 @@ VisualsSettingsCard:CreateColorPicker({
 })
 
 -- ========================================================================
--- Movement Engine (New Method - CFrame Speed, Bhop, Smooth Fly & Noclip)
+-- Movement Engine (New Method - CFrame / Velocity Speed & Fly, Bhop, Noclip)
 -- ========================================================================
 local MovementState = {
 	SpeedEnabled = false,
+	SpeedMode = "CFrame",
 	SpeedValue = 32,
 	BhopEnabled = false,
 	FlyEnabled = false,
+	FlyMode = "CFrame",
 	FlySpeed = 60,
 	NoclipEnabled = false,
 	InfiniteJumpEnabled = false,
@@ -1810,10 +1870,15 @@ NVL_Connect(RunService.Heartbeat, function(dt)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if not hrp or not hum then return end
 
-	-- Speed Assist via CFrame translation (Never touches WalkSpeed -> 0 detections!)
+	-- Speed Assist (CFrame or Velocity mode, 0 impact)
 	if MovementState.SpeedEnabled and hum.MoveDirection.Magnitude > 0 and hum.Health > 0 then
-		local speedBonus = math.max(MovementState.SpeedValue - 16, 0)
-		hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (speedBonus * dt))
+		if MovementState.SpeedMode == "Velocity" then
+			local vel = hum.MoveDirection * MovementState.SpeedValue
+			hrp.AssemblyLinearVelocity = Vector3.new(vel.X, hrp.AssemblyLinearVelocity.Y, vel.Z)
+		else
+			local speedBonus = math.max(MovementState.SpeedValue - 16, 0)
+			hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (speedBonus * dt))
+		end
 	end
 
 	-- Bunny Hop
@@ -1824,7 +1889,7 @@ NVL_Connect(RunService.Heartbeat, function(dt)
 	end
 end)
 
--- Fly Controller
+-- Fly Controller (CFrame and Velocity modes)
 NVL_Connect(RunService.RenderStepped, function(dt)
 	if not MovementState.FlyEnabled then return end
 	local char = lp.Character
@@ -1833,7 +1898,6 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 	if not hrp or not hum or hum.Health <= 0 then return end
 
 	hum.PlatformStand = true
-	hrp.AssemblyLinearVelocity = Vector3.zero
 
 	local camCF = Workspace.CurrentCamera.CFrame
 	local moveDir = Vector3.zero
@@ -1845,8 +1909,17 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
 	if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
 
-	if moveDir.Magnitude > 0 then
-		hrp.CFrame = hrp.CFrame + (moveDir.Unit * (MovementState.FlySpeed * dt))
+	if MovementState.FlyMode == "Velocity" then
+		if moveDir.Magnitude > 0 then
+			hrp.AssemblyLinearVelocity = moveDir.Unit * MovementState.FlySpeed
+		else
+			hrp.AssemblyLinearVelocity = Vector3.zero
+		end
+	else
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		if moveDir.Magnitude > 0 then
+			hrp.CFrame = hrp.CFrame + (moveDir.Unit * (MovementState.FlySpeed * dt))
+		end
 	end
 end)
 
@@ -1877,11 +1950,19 @@ CardSpeed:CreateToggle({
 	Name = "Enable Speed",
 	Default = false,
 	HasSettings = true,
-	Keybind = Enum.KeyCode.V,
+	Keybind = Enum.KeyCode.C,
 	Mode = "Toggle",
 	ShowInBinds = true,
 	Callback = function(v)
 		MovementState.SpeedEnabled = v
+	end,
+})
+CardSpeed:CreateDropdown({
+	Name = "Speed Mode",
+	Options = { "CFrame", "Velocity" },
+	Default = "CFrame",
+	Callback = function(opt)
+		MovementState.SpeedMode = opt
 	end,
 })
 CardSpeed:CreateSlider({
@@ -1926,7 +2007,7 @@ CardSpinbot:CreateToggle({
 	Name = "Enable Spinbot",
 	Default = false,
 	HasSettings = true,
-	Keybind = Enum.KeyCode.X,
+	Keybind = Enum.KeyCode.V,
 	Mode = "Toggle",
 	ShowInBinds = true,
 	Callback = function(v)
@@ -1954,14 +2035,26 @@ CardFlight:CreateToggle({
 	Name = "Fly",
 	Default = false,
 	HasSettings = true,
-	Keybind = Enum.KeyCode.C,
+	Keybind = Enum.KeyCode.X,
 	Mode = "Toggle",
 	ShowInBinds = true,
 	Callback = function(v)
 		MovementState.FlyEnabled = v
-		if not v and lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") then
-			lp.Character:FindFirstChildOfClass("Humanoid").PlatformStand = false
+		local char = lp.Character
+		if not v and char then
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			if hum then hum.PlatformStand = false end
+			local hrp = char:FindFirstChild("HumanoidRootPart")
+			if hrp then hrp.AssemblyLinearVelocity = Vector3.zero end
 		end
+	end,
+})
+CardFlight:CreateDropdown({
+	Name = "Fly Mode",
+	Options = { "CFrame", "Velocity" },
+	Default = "CFrame",
+	Callback = function(opt)
+		MovementState.FlyMode = opt
 	end,
 })
 CardFlight:CreateSlider({
@@ -2178,6 +2271,81 @@ CardCamera:CreateSlider({
 		RefreshWorld()
 	end,
 })
+CardCamera:CreateSlider({
+	Name = "Max Zoom Distance",
+	Min = 10,
+	Max = 1000,
+	Default = 128,
+	Decimals = 0,
+	Callback = function(v)
+		lp.CameraMaxZoomDistance = v
+	end,
+})
+CardCamera:CreateSlider({
+	Name = "Min Zoom Distance",
+	Min = 0.5,
+	Max = 50,
+	Default = 0.5,
+	Decimals = 1,
+	Callback = function(v)
+		lp.CameraMinZoomDistance = v
+	end,
+})
+
+local CamOffsetX = 0
+local CamOffsetY = 0
+local CamOffsetZ = 0
+local function UpdateCamOffset()
+	local char = lp.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.CameraOffset = Vector3.new(CamOffsetX, CamOffsetY, CamOffsetZ)
+	end
+end
+NVL_Connect(lp.CharacterAdded, function(c)
+	task.wait(0.2)
+	UpdateCamOffset()
+end)
+
+local CardViewmodel = ViewTab:CreateCard({
+	Title = "Camera Offset",
+	Side = "right",
+	Icon = MemoryAssets.Icons.view_filled or "",
+	SubTab = "Camera",
+})
+CardViewmodel:CreateSlider({
+	Name = "Offset X (Shoulder)",
+	Min = -10,
+	Max = 10,
+	Default = 0,
+	Decimals = 1,
+	Callback = function(v)
+		CamOffsetX = v
+		UpdateCamOffset()
+	end,
+})
+CardViewmodel:CreateSlider({
+	Name = "Offset Y (Height)",
+	Min = -10,
+	Max = 10,
+	Default = 0,
+	Decimals = 1,
+	Callback = function(v)
+		CamOffsetY = v
+		UpdateCamOffset()
+	end,
+})
+CardViewmodel:CreateSlider({
+	Name = "Offset Z (Distance)",
+	Min = -10,
+	Max = 10,
+	Default = 0,
+	Decimals = 1,
+	Callback = function(v)
+		CamOffsetZ = v
+		UpdateCamOffset()
+	end,
+})
 
 -- ========================================================================
 -- Exploits & Desync Engine (New Method - CFrame Manipulation & Ghost Viz)
@@ -2285,7 +2453,12 @@ NVL_Connect(RunService.Heartbeat, function()
 	if not hrp then return end
 
 	local offset = Vector3.zero
-	if DesyncState.Mode == "Custom" then
+	if DesyncState.Mode == "Jitter" then
+		local tickSign = (math.floor(tick() * 15) % 2 == 0) and 1 or -1
+		offset = Vector3.new(tickSign * DesyncState.RandomAmount, 0, -tickSign * DesyncState.RandomAmount)
+	elseif DesyncState.Mode == "Freeze" then
+		offset = Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
+	elseif DesyncState.Mode == "Custom" then
 		offset = Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
 	elseif DesyncState.Mode == "Underground" then
 		offset = Vector3.new(0, -12, 0)
@@ -2403,8 +2576,8 @@ CardDesync:CreateToggle({
 })
 CardDesync:CreateDropdown({
 	Name = "Desync Mode",
-	Options = { "Custom", "Underground", "Void", "Random", "Safe Shoot", "Freeze" },
-	Default = "Custom",
+	Options = { "Freeze", "Jitter", "Custom", "Underground", "Void", "Random", "Safe Shoot" },
+	Default = "Freeze",
 	Callback = function(opt)
 		DesyncState.Mode = opt
 	end,
