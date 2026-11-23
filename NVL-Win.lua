@@ -104,6 +104,9 @@ local Window = MemoryUI:CreateWindow({
 	LoginRequired = false,
 })
 
+getgenv().NVL_MemoryUI = MemoryUI
+getgenv().NVL_Window = Window
+
 -- Initialize Live Watermark (NEVERLOSE) & Dynamic Spectators List
 local Watermark = Window:CreateWatermark({
 	Title = "NEVERLOSE",
@@ -207,6 +210,7 @@ local CombatState = {
 	VisibleFOV = true,
 	FOVRadius = 150,
 	FOVColor = Color3.fromRGB(186, 145, 252),
+	FOVTargetColor = Color3.fromRGB(255, 80, 100),
 	Hitchance = 100,
 	VisibleCheck = true,
 	Autowall = false,
@@ -219,6 +223,19 @@ local CombatState = {
 	FirstBulletDelay = 0,
 	AfterKillDelay = 500,
 	TeleportBoost = false,
+
+	-- New Combat Methods
+	Triggerbot = false,
+	TriggerbotDelay = 35,
+	TriggerbotHeadOnly = false,
+	TriggerbotRange = 350,
+	TargetLock = false,
+	TargetLockSmoothness = 0.25,
+	TargetPriority = "Closest to Crosshair",
+	NoSpread = false,
+	NoRecoil = false,
+	FastCooldown = false,
+	AutoReload = false,
 }
 
 local CurrentTarget = nil
@@ -231,6 +248,20 @@ local Players = cloneref and cloneref(game:GetService("Players")) or game:GetSer
 local Workspace = cloneref and cloneref(game:GetService("Workspace")) or game:GetService("Workspace")
 local Camera = Workspace.CurrentCamera
 local lp = Players.LocalPlayer
+
+-- Clean previous script connections to prevent accumulating background tasks
+if getgenv().__NVL_Connections then
+	for _, conn in ipairs(getgenv().__NVL_Connections) do
+		pcall(function() conn:Disconnect() end)
+	end
+end
+getgenv().__NVL_Connections = {}
+
+local function NVL_Connect(signal, callback)
+	local conn = signal:Connect(callback)
+	table.insert(getgenv().__NVL_Connections, conn)
+	return conn
+end
 
 local oldFovGui = CoreGui:FindFirstChild("NVL_FOV_Container")
 if oldFovGui then oldFovGui:Destroy() end
@@ -265,7 +296,11 @@ local function UpdateFOVCircle()
 		FOVCircle.Size = UDim2.new(0, CombatState.FOVRadius * 2, 0, CombatState.FOVRadius * 2)
 		FOVCircle.Visible = CombatState.Enabled and CombatState.DrawFOV and CombatState.VisibleFOV
 		if FOVStroke then
-			FOVStroke.Color = CombatState.FOVColor
+			if CurrentTarget and CurrentTargetPart then
+				FOVStroke.Color = CombatState.FOVTargetColor
+			else
+				FOVStroke.Color = CombatState.FOVColor
+			end
 		end
 	end
 end
@@ -335,11 +370,50 @@ local function GetClosestTarget()
 	return bestTarget, bestPart
 end
 
+-- Triggerbot Engine (New Method - Raycast Target Interception)
+local lastTriggerShot = 0
+local function ProcessTriggerbot()
+	if not CombatState.Enabled or not CombatState.Triggerbot then return end
+	local now = tick()
+	if (now - lastTriggerShot) < (CombatState.TriggerbotDelay / 1000) then return end
+
+	local mousePos = UserInputService:GetMouseLocation()
+	local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { lp.Character }
+
+	local res = Workspace:Raycast(ray.Origin, ray.Direction * CombatState.TriggerbotRange, rayParams)
+	if res and res.Instance then
+		local hitChar = res.Instance:FindFirstAncestorOfClass("Model")
+		local hitPlayer = hitChar and Players:GetPlayerFromCharacter(hitChar)
+		if hitPlayer and hitPlayer ~= lp then
+			local hum = hitChar:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				if CombatState.TriggerbotHeadOnly and res.Instance.Name ~= "Head" then
+					return
+				end
+				if CombatState.IgnoreFriends and Spectators and Spectators.GetRelation then
+					if Spectators.GetRelation(hitPlayer.Name) == "Friendly" then return end
+				end
+				lastTriggerShot = now
+				local tool = lp.Character and lp.Character:FindFirstChildOfClass("Tool")
+				if tool then
+					tool:Activate()
+				elseif mouse1click then
+					mouse1click()
+				end
+			end
+		end
+	end
+end
+
 -- Update Loop for Combat (RenderStepped)
-RunService.RenderStepped:Connect(function()
+NVL_Connect(RunService.RenderStepped, function(dt)
 	UpdateFOVCircle()
 	CurrentTarget, CurrentTargetPart = GetClosestTarget()
 
+	-- Auto Fire
 	if CombatState.Enabled and CombatState.AutoFire and CurrentTarget and CurrentTargetPart then
 		local char = lp.Character
 		local tool = char and char:FindFirstChildOfClass("Tool")
@@ -347,6 +421,19 @@ RunService.RenderStepped:Connect(function()
 			tool:Activate()
 		end
 	end
+
+	-- Sticky Aim / Target Lock (Smooth Camera Tracking)
+	if CombatState.Enabled and CombatState.TargetLock and CurrentTargetPart and Camera then
+		local targetScreen, onScreen = Camera:WorldToViewportPoint(CurrentTargetPart.Position)
+		if onScreen then
+			local curCF = Camera.CFrame
+			local targetCF = CFrame.new(curCF.Position, CurrentTargetPart.Position)
+			Camera.CFrame = curCF:Lerp(targetCF, math.clamp(CombatState.TargetLockSmoothness, 0.05, 1))
+		end
+	end
+
+	-- Triggerbot
+	ProcessTriggerbot()
 end)
 
 -- Silent Aim Hooking (New Method: namecall interception)
@@ -736,6 +823,243 @@ local CardTeamSettings = GeneralTab:CreateCard({
 })
 CardTeamSettings:CreateToggle({ Name = "Share Target Over Network", Default = false })
 CardTeamSettings:CreateToggle({ Name = "Draw Teammate Tracers", Default = true })
+
+-- ========================================================================
+-- Populate Aimbot Tab (SubTabs: Main, Target, Accuracy)
+-- ========================================================================
+local CardAimbotMainLeft = AimbotTab:CreateCard({
+	Title = "Sticky Aim & Lock",
+	Side = "left",
+	Icon = MemoryAssets.Icons.target_fill or "",
+	SubTab = "Main",
+})
+CardAimbotMainLeft:CreateToggle({
+	Name = "Target Lock",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.E,
+	Mode = "Hold",
+	ShowInBinds = true,
+	Callback = function(v)
+		CombatState.TargetLock = v
+	end,
+})
+CardAimbotMainLeft:CreateSlider({
+	Name = "Lock Smoothness",
+	Min = 5,
+	Max = 100,
+	Default = 25,
+	Suffix = "%",
+	Callback = function(v)
+		CombatState.TargetLockSmoothness = v / 100
+	end,
+})
+CardAimbotMainLeft:CreateToggle({
+	Name = "Dynamic Prediction",
+	Default = true,
+	Callback = function(v)
+		CombatState.Prediction = v and 0.135 or 0
+	end,
+})
+
+local CardAimbotMainRight = AimbotTab:CreateCard({
+	Title = "Camera & Targeting",
+	Side = "right",
+	Icon = MemoryAssets.Icons.view_filled or "",
+	SubTab = "Main",
+})
+CardAimbotMainRight:CreateDropdown({
+	Name = "Target Priority",
+	Options = { "Closest to Crosshair", "Lowest Health", "Lowest Distance" },
+	Default = "Closest to Crosshair",
+	Callback = function(opt)
+		CombatState.TargetPriority = opt
+	end,
+})
+CardAimbotMainRight:CreateSlider({
+	Name = "FOV Radius",
+	Min = 30,
+	Max = 500,
+	Default = 150,
+	Decimals = 0,
+	Callback = function(v)
+		CombatState.FOVRadius = v
+		UpdateFOVCircle()
+	end,
+})
+
+-- SubTab: Target
+local CardAimbotTargetLeft = AimbotTab:CreateCard({
+	Title = "Target Filters",
+	Side = "left",
+	Icon = MemoryAssets.Icons.users or "",
+	SubTab = "Target",
+})
+CardAimbotTargetLeft:CreateToggle({
+	Name = "Target Players",
+	Default = true,
+	Callback = function(v) end,
+})
+CardAimbotTargetLeft:CreateToggle({
+	Name = "Target NPCs / Bots",
+	Default = false,
+	Callback = function(v) end,
+})
+CardAimbotTargetLeft:CreateToggle({
+	Name = "Visible Raycast Check",
+	Default = true,
+	Callback = function(v)
+		CombatState.VisibleCheck = v
+	end,
+})
+
+local CardAimbotTargetRight = AimbotTab:CreateCard({
+	Title = "Hitboxes & Aim Points",
+	Side = "right",
+	Icon = MemoryAssets.Icons.dots_2 or "",
+	SubTab = "Target",
+})
+CardAimbotTargetRight:CreateDropdown({
+	Name = "Preferred Hitbox",
+	Options = { "Head", "HumanoidRootPart", "Torso", "Random" },
+	Default = "Head",
+	Callback = function(opt)
+		CombatState.TargetPart = (opt == "Head" and "Head") or "HumanoidRootPart"
+	end,
+})
+CardAimbotTargetRight:CreateSlider({
+	Name = "Max Target Distance",
+	Min = 50,
+	Max = 1500,
+	Default = 500,
+	Decimals = 0,
+	Callback = function(v)
+		CombatState.MaxDistance = v
+	end,
+})
+
+-- SubTab: Accuracy
+local CardAimbotAccLeft = AimbotTab:CreateCard({
+	Title = "Recoil & Spread Control",
+	Side = "left",
+	Icon = MemoryAssets.Icons.sliders or "",
+	SubTab = "Accuracy",
+})
+CardAimbotAccLeft:CreateToggle({
+	Name = "No Spread Reducer",
+	Default = false,
+	Callback = function(v)
+		CombatState.NoSpread = v
+	end,
+})
+CardAimbotAccLeft:CreateToggle({
+	Name = "No Recoil Reducer",
+	Default = false,
+	Callback = function(v)
+		CombatState.NoRecoil = v
+	end,
+})
+
+local CardAimbotAccRight = AimbotTab:CreateCard({
+	Title = "Hitchance & Multipliers",
+	Side = "right",
+	Icon = MemoryAssets.Icons.target_fill or "",
+	SubTab = "Accuracy",
+})
+CardAimbotAccRight:CreateSlider({
+	Name = "Hit Probability",
+	Min = 10,
+	Max = 100,
+	Default = 100,
+	Suffix = "%",
+	Callback = function(v)
+		CombatState.Hitchance = v
+	end,
+})
+
+-- ========================================================================
+-- Populate Others Tab (SubTabs: Triggerbot, Overrides)
+-- ========================================================================
+local CardTrigMain = OthersTab:CreateCard({
+	Title = "Triggerbot Core",
+	Side = "left",
+	Icon = MemoryAssets.Icons.target_fill or "",
+	SubTab = "Triggerbot",
+})
+CardTrigMain:CreateToggle({
+	Name = "Enable Triggerbot",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.T,
+	Mode = "Toggle",
+	ShowInBinds = true,
+	Callback = function(v)
+		CombatState.Triggerbot = v
+	end,
+})
+CardTrigMain:CreateSlider({
+	Name = "Reaction Delay",
+	Min = 0,
+	Max = 200,
+	Default = 35,
+	Suffix = "ms",
+	Callback = function(v)
+		CombatState.TriggerbotDelay = v
+	end,
+})
+CardTrigMain:CreateToggle({
+	Name = "Headshot Only",
+	Default = false,
+	Callback = function(v)
+		CombatState.TriggerbotHeadOnly = v
+	end,
+})
+
+local CardTrigFilters = OthersTab:CreateCard({
+	Title = "Triggerbot Conditions",
+	Side = "right",
+	Icon = MemoryAssets.Icons.sliders or "",
+	SubTab = "Triggerbot",
+})
+CardTrigFilters:CreateToggle({
+	Name = "Ignore Teammates",
+	Default = true,
+	Callback = function(v)
+		CombatState.IgnoreFriends = v
+	end,
+})
+CardTrigFilters:CreateSlider({
+	Name = "Max Trigger Range",
+	Min = 20,
+	Max = 1000,
+	Default = 350,
+	Suffix = " studs",
+	Callback = function(v)
+		CombatState.TriggerbotRange = v
+	end,
+})
+
+-- SubTab: Overrides
+local CardOverrides = OthersTab:CreateCard({
+	Title = "Weapon Handling",
+	Side = "left",
+	Icon = MemoryAssets.Icons.sharp_edit or "",
+	SubTab = "Overrides",
+})
+CardOverrides:CreateToggle({
+	Name = "Fast Tool Cooldown",
+	Default = false,
+	Callback = function(v)
+		CombatState.FastCooldown = v
+	end,
+})
+CardOverrides:CreateToggle({
+	Name = "Auto Reload",
+	Default = false,
+	Callback = function(v)
+		CombatState.AutoReload = v
+	end,
+})
 
 -- ========================================================================
 -- Populate Players Tab (Visuals & ESP)
@@ -1135,8 +1459,8 @@ for _, p in ipairs(Players:GetPlayers()) do
 	SetupPlayer(p)
 end
 
-Players.PlayerAdded:Connect(SetupPlayer)
-Players.PlayerRemoving:Connect(CleanupPlayerESP)
+NVL_Connect(Players.PlayerAdded, SetupPlayer)
+NVL_Connect(Players.PlayerRemoving, CleanupPlayerESP)
 
 -- Connect Spectator Relation Changed
 if Spectators and Spectators.SetOnRelationChanged then
@@ -1442,9 +1766,44 @@ local MovementState = {
 	FlyEnabled = false,
 	FlySpeed = 60,
 	NoclipEnabled = false,
+	InfiniteJumpEnabled = false,
+	SpinbotEnabled = false,
+	SpinSpeed = 15,
 }
 
-RunService.Heartbeat:Connect(function(dt)
+-- Infinite Jump Listener (Event-driven, 0 FPS impact)
+NVL_Connect(UserInputService.JumpRequest, function()
+	if MovementState.InfiniteJumpEnabled then
+		local char = lp.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 then
+			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+	end
+end)
+
+-- Spinbot Anti-Aim Controller
+local spinAngle = 0
+NVL_Connect(RunService.RenderStepped, function(dt)
+	if MovementState.SpinbotEnabled then
+		local char = lp.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hrp and hum and hum.Health > 0 then
+			hum.AutoRotate = false
+			spinAngle = (spinAngle + (MovementState.SpinSpeed * dt * 60)) % 360
+			hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(spinAngle), 0)
+		end
+	else
+		local char = lp.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum and not hum.AutoRotate then
+			hum.AutoRotate = true
+		end
+	end
+end)
+
+NVL_Connect(RunService.Heartbeat, function(dt)
 	local char = lp.Character
 	if not char then return end
 	local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -1466,7 +1825,7 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 -- Fly Controller
-RunService.RenderStepped:Connect(function(dt)
+NVL_Connect(RunService.RenderStepped, function(dt)
 	if not MovementState.FlyEnabled then return end
 	local char = lp.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1492,7 +1851,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 -- Noclip Controller
-RunService.Stepped:Connect(function()
+NVL_Connect(RunService.Stepped, function()
 	if MovementState.NoclipEnabled then
 		local char = lp.Character
 		if char then
@@ -1537,7 +1896,7 @@ CardSpeed:CreateSlider({
 })
 
 local CardBhop = MovementTab:CreateCard({
-	Title = "Bunny Hop",
+	Title = "Bunny Hop & Jump",
 	Side = "left",
 	Icon = MemoryAssets.Icons.sliders or "",
 	SubTab = "Bhop",
@@ -1547,6 +1906,41 @@ CardBhop:CreateToggle({
 	Default = false,
 	Callback = function(v)
 		MovementState.BhopEnabled = v
+	end,
+})
+CardBhop:CreateToggle({
+	Name = "Infinite Jump",
+	Default = false,
+	Callback = function(v)
+		MovementState.InfiniteJumpEnabled = v
+	end,
+})
+
+local CardSpinbot = MovementTab:CreateCard({
+	Title = "Spinbot Anti-Aim",
+	Side = "right",
+	Icon = MemoryAssets.Icons.sliders or "",
+	SubTab = "Bhop",
+})
+CardSpinbot:CreateToggle({
+	Name = "Enable Spinbot",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.X,
+	Mode = "Toggle",
+	ShowInBinds = true,
+	Callback = function(v)
+		MovementState.SpinbotEnabled = v
+	end,
+})
+CardSpinbot:CreateSlider({
+	Name = "Spin Speed",
+	Min = 1,
+	Max = 50,
+	Default = 15,
+	Decimals = 0,
+	Callback = function(v)
+		MovementState.SpinSpeed = v
 	end,
 })
 
@@ -1799,35 +2193,57 @@ local DesyncState = {
 	VizColor = Color3.fromRGB(186, 145, 252),
 	VizMaterial = Enum.Material.ForceField,
 }
+getgenv().NVL_DesyncState = DesyncState
 
 local GhostClone = nil
 
 local function RemoveGhostClone()
 	if GhostClone and GhostClone.Parent then
 		GhostClone:Destroy()
-		GhostClone = nil
+	end
+	GhostClone = nil
+	local stray = Workspace:FindFirstChild("NVL_GhostClone")
+	while stray do
+		stray:Destroy()
+		stray = Workspace:FindFirstChild("NVL_GhostClone")
 	end
 end
 
 local function UpdateGhostClone(cframePos)
 	local char = lp.Character
-	if not char then return end
+	if not char or not char:FindFirstChild("HumanoidRootPart") then
+		RemoveGhostClone()
+		return
+	end
 
 	if not GhostClone or not GhostClone.Parent then
+		local stray = Workspace:FindFirstChild("NVL_GhostClone")
+		while stray do
+			stray:Destroy()
+			stray = Workspace:FindFirstChild("NVL_GhostClone")
+		end
+
 		char.Archivable = true
 		GhostClone = char:Clone()
 		char.Archivable = false
+		GhostClone.Name = "NVL_GhostClone"
 
 		for _, item in ipairs(GhostClone:GetDescendants()) do
-			if item:IsA("Script") or item:IsA("LocalScript") then
+			if item:IsA("Script") or item:IsA("LocalScript") or item:IsA("Sound") or item:IsA("Decal") then
 				item:Destroy()
 			elseif item:IsA("BasePart") then
 				item.CanCollide = false
-				item.Anchored = true
+				item.CastShadow = false
+				item.Anchored = false -- Unanchor limbs so model pivots cleanly as one cohesive figure
 				item.Transparency = 0.5
 				item.Material = DesyncState.VizMaterial
 				item.Color = DesyncState.VizColor
 			end
+		end
+
+		local ghostHrp = GhostClone:FindFirstChild("HumanoidRootPart")
+		if ghostHrp then
+			ghostHrp.Anchored = true
 		end
 
 		local hl = Instance.new("Highlight")
@@ -1835,19 +2251,30 @@ local function UpdateGhostClone(cframePos)
 		hl.FillColor = DesyncState.VizColor
 		hl.FillTransparency = 0.5
 		hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+		hl.OutlineTransparency = 0.2
 		hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 		hl.Parent = GhostClone
 
 		GhostClone.Parent = Workspace
 	end
 
-	local ghostHrp = GhostClone:FindFirstChild("HumanoidRootPart")
-	if ghostHrp then
-		ghostHrp.CFrame = cframePos
+	for _, item in ipairs(GhostClone:GetDescendants()) do
+		if item:IsA("BasePart") then
+			if item.Color ~= DesyncState.VizColor then item.Color = DesyncState.VizColor end
+			if item.Material ~= DesyncState.VizMaterial then item.Material = DesyncState.VizMaterial end
+		elseif item:IsA("Highlight") then
+			if item.FillColor ~= DesyncState.VizColor then item.FillColor = DesyncState.VizColor end
+		end
 	end
+
+	GhostClone:PivotTo(cframePos)
 end
 
-RunService.Heartbeat:Connect(function()
+NVL_Connect(lp.CharacterAdded, function()
+	RemoveGhostClone()
+end)
+
+NVL_Connect(RunService.Heartbeat, function()
 	if not DesyncState.Enabled then
 		RemoveGhostClone()
 		return
@@ -1880,7 +2307,81 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ========================================================================
--- Populate Exploits Tab
+-- Fake Lag Engine (Packet Choking & Network Throttling)
+-- ========================================================================
+local FakeLagState = {
+	Enabled = false,
+	ChokeTicks = 12,
+	Mode = "Static", -- Static, Pulse, Random
+	Visualize = false,
+}
+
+local fakeLagTickCount = 0
+NVL_Connect(RunService.Heartbeat, function()
+	if not FakeLagState.Enabled then return end
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	fakeLagTickCount = fakeLagTickCount + 1
+	local limit = FakeLagState.ChokeTicks
+	if FakeLagState.Mode == "Random" then
+		limit = math.random(4, FakeLagState.ChokeTicks)
+	elseif FakeLagState.Mode == "Pulse" then
+		limit = (fakeLagTickCount % 2 == 0) and 2 or FakeLagState.ChokeTicks
+	end
+
+	if fakeLagTickCount >= limit then
+		fakeLagTickCount = 0
+		if sethiddenproperty then
+			pcall(function() sethiddenproperty(Workspace, "InterpolationThrottling", Enum.InterpolationThrottlingMode.Default) end)
+		end
+	else
+		if sethiddenproperty then
+			pcall(function() sethiddenproperty(Workspace, "InterpolationThrottling", Enum.InterpolationThrottlingMode.Disabled) end)
+		end
+	end
+end)
+
+-- ========================================================================
+-- Server Manager Engine (Instant Rejoin & Server Hop)
+-- ========================================================================
+local TeleportService = cloneref and cloneref(game:GetService("TeleportService")) or game:GetService("TeleportService")
+local HttpService = cloneref and cloneref(game:GetService("HttpService")) or game:GetService("HttpService")
+
+local function RejoinServer()
+	MemoryUI:Notify({ Title = "Server", Content = "Rejoining current server...", Duration = 3 })
+	if #Players:GetPlayers() <= 1 then
+		TeleportService:Teleport(game.PlaceId, lp)
+	else
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, lp)
+	end
+end
+
+local function ServerHop()
+	MemoryUI:Notify({ Title = "Server Hop", Content = "Searching for active public server...", Duration = 3 })
+	task.spawn(function()
+		local ok, res = pcall(function()
+			local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
+			local body = game:HttpGet(url)
+			return HttpService:JSONDecode(body)
+		end)
+		if ok and res and res.data then
+			for _, srv in ipairs(res.data) do
+				if srv.id ~= game.JobId and srv.playing and srv.maxPlayers and srv.playing < srv.maxPlayers then
+					MemoryUI:Notify({ Title = "Server Hop", Content = "Teleporting to server " .. tostring(srv.id):sub(1, 8) .. "...", Duration = 3 })
+					TeleportService:TeleportToPlaceInstance(game.PlaceId, srv.id, lp)
+					return
+				end
+			end
+		end
+		MemoryUI:Notify({ Title = "Server Hop", Content = "No active alternative server found, reconnecting...", Duration = 3 })
+		TeleportService:Teleport(game.PlaceId, lp)
+	end)
+end
+
+-- ========================================================================
+-- Populate Exploits Tab (SubTabs: Desync, Fake Lag, Server)
 -- ========================================================================
 local CardDesync = ExploitsTab:CreateCard({
 	Title = "Desync Anti-Aim",
@@ -1974,6 +2475,109 @@ CardDesyncViz:CreateDropdown({
 	Default = "ForceField",
 	Callback = function(opt)
 		DesyncState.VizMaterial = Enum.Material[opt] or Enum.Material.ForceField
+	end,
+})
+
+-- SubTab: Fake Lag
+local CardFakeLag = ExploitsTab:CreateCard({
+	Title = "Packet Choking",
+	Side = "left",
+	Icon = MemoryAssets.Icons.sliders or "",
+	SubTab = "Fake Lag",
+})
+CardFakeLag:CreateToggle({
+	Name = "Enable Fake Lag",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.Z,
+	Mode = "Toggle",
+	ShowInBinds = true,
+	Callback = function(v)
+		FakeLagState.Enabled = v
+	end,
+})
+CardFakeLag:CreateSlider({
+	Name = "Choke Ticks",
+	Min = 1,
+	Max = 20,
+	Default = 12,
+	Decimals = 0,
+	Callback = function(v)
+		FakeLagState.ChokeTicks = v
+	end,
+})
+CardFakeLag:CreateDropdown({
+	Name = "Lag Pattern",
+	Options = { "Static", "Pulse", "Random" },
+	Default = "Static",
+	Callback = function(opt)
+		FakeLagState.Mode = opt
+	end,
+})
+
+local CardFakeLagViz = ExploitsTab:CreateCard({
+	Title = "Network Simulation",
+	Side = "right",
+	Icon = MemoryAssets.Icons.view_filled or "",
+	SubTab = "Fake Lag",
+})
+CardFakeLagViz:CreateToggle({
+	Name = "Visualize Choked Marker",
+	Default = false,
+	Callback = function(v)
+		FakeLagState.Visualize = v
+	end,
+})
+
+-- SubTab: Server
+local CardServerActions = ExploitsTab:CreateCard({
+	Title = "Server Operations",
+	Side = "left",
+	Icon = MemoryAssets.Icons.world_2_fill or "",
+	SubTab = "Server",
+})
+CardServerActions:CreateButton({
+	Text = "Rejoin Server",
+	Callback = function()
+		RejoinServer()
+	end,
+})
+CardServerActions:CreateButton({
+	Text = "Server Hop (Next Server)",
+	Callback = function()
+		ServerHop()
+	end,
+})
+CardServerActions:CreateButton({
+	Text = "Copy JobId",
+	Callback = function()
+		if setclipboard then
+			setclipboard(tostring(game.JobId))
+			MemoryUI:Notify({ Title = "Server", Content = "JobId copied to clipboard!", Duration = 2 })
+		end
+	end,
+})
+CardServerActions:CreateButton({
+	Text = "Copy Join Script",
+	Callback = function()
+		if setclipboard then
+			setclipboard('game:GetService("TeleportService"):TeleportToPlaceInstance(' .. tostring(game.PlaceId) .. ', "' .. tostring(game.JobId) .. '")')
+			MemoryUI:Notify({ Title = "Server", Content = "Join script copied to clipboard!", Duration = 2 })
+		end
+	end,
+})
+
+local CardServerTelemetry = ExploitsTab:CreateCard({
+	Title = "Server Telemetry",
+	Side = "right",
+	Icon = MemoryAssets.Icons.settings_bold or "",
+	SubTab = "Server",
+})
+CardServerTelemetry:CreateToggle({
+	Name = "Auto Rejoin on Kick",
+	Default = false,
+	Callback = function(v)
+		print("[NVL-Win] Auto Rejoin on Kick:", v)
 	end,
 })
 

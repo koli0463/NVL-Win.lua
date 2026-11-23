@@ -873,8 +873,8 @@ function MemoryUI:CreateSpectators(config)
 				ZIndex = 83,
 			})
 
-			-- @Username Label (Hover auto-copies UserId to clipboard)
-			local UserLabel = Create("TextLabel", {
+			-- @Username Label (Click to copy UserId with 3s feedback)
+			local UserLabel = Create("TextButton", {
 				Parent = row,
 				Size = UDim2.new(0, 95, 0, 12),
 				Position = UDim2.new(0, 38, 0, 17),
@@ -886,32 +886,52 @@ function MemoryUI:CreateSpectators(config)
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextTruncate = Enum.TextTruncate.AtEnd,
 				Active = true,
+				AutoButtonColor = false,
 				ZIndex = 83,
 			})
 
-			local lastCopiedTime = 0
+			local isCopiedFeedback = false
+			local function TriggerCopy()
+				if isCopiedFeedback then return end
+				isCopiedFeedback = true
+				local idStr = tostring(uid)
+				pcall(function()
+					if setclipboard then
+						setclipboard(idStr)
+					elseif toclipboard then
+						toclipboard(idStr)
+					end
+				end)
+
+				local origText = "@" .. name:lower()
+				UserLabel.Text = "[COPIED ID]"
+				UserLabel.TextColor3 = Color3.fromRGB(80, 255, 140)
+
+				MemoryUI:Notify({
+					Title = "Clipboard",
+					Content = "Copied UserId " .. idStr .. " (@" .. name .. ")",
+					Duration = 2,
+				})
+
+				task.delay(3, function()
+					if UserLabel and UserLabel.Parent then
+						UserLabel.Text = origText
+						UserLabel.TextColor3 = Color3.fromRGB(115, 115, 125)
+					end
+					isCopiedFeedback = false
+				end)
+			end
+
+			UserLabel.MouseButton1Click:Connect(TriggerCopy)
 			UserLabel.MouseEnter:Connect(function()
-				local now = tick()
-				if now - lastCopiedTime > 1.2 then
-					lastCopiedTime = now
-					local idStr = tostring(uid)
-					pcall(function()
-						if setclipboard then
-							setclipboard(idStr)
-						elseif toclipboard then
-							toclipboard(idStr)
-						end
-					end)
+				if not isCopiedFeedback then
 					Tween(UserLabel, TweenInfo.new(0.15), { TextColor3 = Theme.Accent })
-					MemoryUI:Notify({
-						Title = "Clipboard",
-						Content = "Copied UserId " .. idStr .. " (@" .. name .. ")",
-						Duration = 1.5,
-					})
 				end
 			end)
 			UserLabel.MouseLeave:Connect(function()
-				Tween(UserLabel, TweenInfo.new(0.15), { TextColor3 = Color3.fromRGB(115, 115, 125) })
+				if not isCopiedFeedback then
+					Tween(UserLabel, TweenInfo.new(0.15), { TextColor3 = Color3.fromRGB(115, 115, 125) })
+				end
 			end)
 
 			-- Right Click Context Menu Handler (Row & Labels)
@@ -1094,12 +1114,36 @@ function MemoryUI:OpenSubSettings(config)
 	local callback = config.Callback or function() end
 	local owner = config.Owner
 
-	-- Toggle behavior: clicking the same gear button closes the modal
+	-- Smooth Close Helper
+	local function CloseModal()
+		if self.ActiveSubSettings and self.ActiveSubSettings.Parent and not self.ActiveSubSettingsClosing then
+			self.ActiveSubSettingsClosing = true
+			local targetModal = self.ActiveSubSettings
+			local targetScale = targetModal:FindFirstChildOfClass("UIScale")
+			if targetScale then
+				Tween(targetScale, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.75 })
+			end
+			Tween(targetModal, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				Position = targetModal.Position + UDim2.new(0, 0, 0, -8),
+				BackgroundTransparency = 1,
+			})
+			task.delay(0.18, function()
+				if targetModal and targetModal.Parent then
+					targetModal:Destroy()
+				end
+				if self.ActiveSubSettings == targetModal then
+					self.ActiveSubSettings = nil
+					self.ActiveSubSettingsOwner = nil
+				end
+				self.ActiveSubSettingsClosing = false
+			end)
+		end
+	end
+
+	-- Toggle behavior: clicking the same gear button closes the modal with animation
 	if self.ActiveSubSettings and self.ActiveSubSettings.Parent then
 		local prevOwner = self.ActiveSubSettingsOwner
-		self.ActiveSubSettings:Destroy()
-		self.ActiveSubSettings = nil
-		self.ActiveSubSettingsOwner = nil
+		CloseModal()
 		if prevOwner and prevOwner == owner then
 			return
 		end
@@ -1107,18 +1151,34 @@ function MemoryUI:OpenSubSettings(config)
 
 	self.ActiveSubSettingsOwner = owner
 
+	local targetPos = config.Position or UDim2.new(0.5, -100, 0.5, -70)
 	local Modal = Create("Frame", {
 		Name = "SubSettingsPopout",
 		Parent = self.ScreenGui,
 		Size = UDim2.new(0, 200, 0, 140),
-		Position = config.Position or UDim2.new(0.5, -100, 0.5, -70),
+		Position = targetPos + UDim2.new(0, 0, 0, -10),
 		BackgroundColor3 = Color3.fromRGB(15, 16, 19),
+		BackgroundTransparency = 0.3,
 		BorderSizePixel = 0,
 		Active = true,
 		ZIndex = 400,
 	})
 	Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Modal })
 	Create("UIStroke", { Parent = Modal, Color = Theme.BorderPurple, Thickness = 1.5 })
+
+	local ModalScale = Create("UIScale", {
+		Parent = Modal,
+		Scale = 0.75,
+	})
+
+	-- Animate Open with Spring Back easing
+	Tween(Modal, TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Position = targetPos,
+		BackgroundTransparency = 0,
+	})
+	Tween(ModalScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Scale = 1.0,
+	})
 
 	self.ActiveSubSettings = Modal
 
@@ -1274,6 +1334,32 @@ function MemoryUI:OpenSubSettings(config)
 		CheckBox.BackgroundColor3 = showInBinds and Theme.Accent or Color3.fromRGB(20, 21, 25)
 		pcall(callback, { Key = curKey, Mode = curMode, ShowInBinds = showInBinds })
 	end)
+
+	-- Outside Click Detection to close with animation
+	local outsideConn
+	outsideConn = UserInputService.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if Modal and Modal.Parent then
+				local mPos = Modal.AbsolutePosition
+				local mSize = Modal.AbsoluteSize
+				local x, y = input.Position.X, input.Position.Y
+				local insideModal = (x >= mPos.X and x <= mPos.X + mSize.X and y >= mPos.Y and y <= mPos.Y + mSize.Y)
+				local insideOwner = false
+				if owner and owner.Parent then
+					local oPos = owner.AbsolutePosition
+					local oSize = owner.AbsoluteSize
+					insideOwner = (x >= oPos.X and x <= oPos.X + oSize.X and y >= oPos.Y and y <= oPos.Y + oSize.Y)
+				end
+				if not insideModal and not insideOwner then
+					if outsideConn then outsideConn:Disconnect() end
+					CloseModal()
+				end
+			else
+				if outsideConn then outsideConn:Disconnect() end
+			end
+		end
+	end)
+	table.insert(self.Connections, outsideConn)
 
 	return Modal
 end
@@ -2527,6 +2613,9 @@ function MemoryUI:CreateWindow(config)
 				local hasSettings = (toggleConfig.HasSettings or toggleConfig.Settings ~= nil)
 
 				local currentState = defaultState
+				local currentKey = toggleConfig.Keybind
+				local currentMode = toggleConfig.Mode or "Toggle"
+				local showInBinds = toggleConfig.ShowInBinds or false
 
 				local Row = Create("Frame", {
 					Name = "Toggle_" .. toggleName,
@@ -2577,10 +2666,17 @@ function MemoryUI:CreateWindow(config)
 							Owner = GearBtn,
 							Title = toggleName .. " Settings",
 							Position = UDim2.new(0, math.clamp(abs.X - 190, 20, 1200), 0, math.clamp(abs.Y + 20, 20, 800)),
-							Keybind = toggleConfig.Keybind or Enum.KeyCode.F,
-							Mode = toggleConfig.Mode or "Toggle",
-							ShowInBinds = toggleConfig.ShowInBinds or false,
-							Callback = toggleConfig.OnSettings or function() end,
+							Keybind = currentKey or Enum.KeyCode.F,
+							Mode = currentMode,
+							ShowInBinds = showInBinds,
+							Callback = function(settingsData)
+								if settingsData.Key ~= nil then currentKey = settingsData.Key end
+								if settingsData.Mode ~= nil then currentMode = settingsData.Mode end
+								if settingsData.ShowInBinds ~= nil then showInBinds = settingsData.ShowInBinds end
+								if toggleConfig.OnSettings then
+									pcall(toggleConfig.OnSettings, settingsData)
+								end
+							end,
 						})
 					end)
 				end
@@ -2672,9 +2768,49 @@ function MemoryUI:CreateWindow(config)
 
 				Pill.MouseButton1Click:Connect(function() SetState(not currentState) end)
 
+				-- Active Keybind Listener (Toggle / Hold / Always modes)
+				local keyConnBegan = UserInputService.InputBegan:Connect(function(input, gpe)
+					if gpe then return end
+					if UserInputService:GetFocusedTextBox() then return end
+					if currentKey and input.KeyCode == currentKey then
+						if currentMode == "Toggle" then
+							SetState(not currentState)
+						elseif currentMode == "Hold" then
+							SetState(true)
+						elseif currentMode == "Always" then
+							SetState(true)
+						end
+					end
+				end)
+				table.insert(MemoryUI.Connections, keyConnBegan)
+
+				local keyConnEnded = UserInputService.InputEnded:Connect(function(input)
+					if UserInputService:GetFocusedTextBox() then return end
+					if currentKey and input.KeyCode == currentKey then
+						if currentMode == "Hold" then
+							SetState(false)
+						end
+					end
+				end)
+				table.insert(MemoryUI.Connections, keyConnEnded)
+
 				local toggleObj = {
-					Set = function(v) SetState(v == true) end,
+					Set = function(v, extra)
+						local val = (extra ~= nil and extra) or v
+						SetState(val == true)
+					end,
 					Get = function() return currentState end,
+					SetKeybind = function(a, b, c, d)
+						local key = (typeof(a) == "table" and b) or a
+						local mode = (typeof(a) == "table" and c) or b
+						local inBinds = (typeof(a) == "table" and d) or c
+						if key then currentKey = key end
+						if mode then currentMode = mode end
+						if inBinds ~= nil then showInBinds = inBinds end
+					end,
+					GetKeybind = function()
+						return { Key = currentKey, Mode = currentMode, ShowInBinds = showInBinds }
+					end,
 				}
 
 				local flagKey = toggleConfig.Flag or toggleName
@@ -2682,6 +2818,8 @@ function MemoryUI:CreateWindow(config)
 					Type = "Toggle",
 					Get = toggleObj.Get,
 					Set = toggleObj.Set,
+					GetKeybind = toggleObj.GetKeybind,
+					SetKeybind = toggleObj.SetKeybind,
 				}
 
 				return toggleObj
@@ -2946,7 +3084,8 @@ function MemoryUI:CreateWindow(config)
 				table.insert(MemoryUI.Connections, endConn)
 
 				local sliderObj = {
-					Set = function(val)
+					Set = function(v, extra)
+						local val = (extra ~= nil and extra) or v
 						currentValue = math.clamp(tonumber(val) or defaultVal, minVal, maxVal)
 						ValueInput.Text = string.format("%." .. decimals .. "f", currentValue)
 						UpdateSlider(0, true)
@@ -3117,7 +3256,8 @@ function MemoryUI:CreateWindow(config)
 				end)
 
 				local dropObj = {
-					Set = function(opt)
+					Set = function(v, extra)
+						local opt = (extra ~= nil and extra) or v
 						selected = opt
 						SelectLabel.Text = tostring(selected)
 						Populate()
