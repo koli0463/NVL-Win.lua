@@ -524,6 +524,444 @@ CardTeamSettings:CreateToggle({ Name = "Draw Teammate Tracers", Default = true }
 -- Populate Players Tab (Visuals & ESP)
 -- ========================================================================
 
+-- Visuals & ESP Engine (Pure GPU Native Instances - 0 FPS Impact)
+local VisualsState = {
+	Enabled = true,
+	-- Boxes
+	Boxes = true,
+	BoxColor = Color3.fromRGB(186, 145, 252),
+	FilledBox = false,
+	FilledBoxColor = Color3.fromRGB(186, 145, 252),
+	FilledBoxTransparency = 0.85,
+	BoxOutline = true,
+	CornerBox = false,
+
+	-- Player Info
+	NameTags = true,
+	NameColor = Color3.fromRGB(240, 240, 245),
+	HealthBar = true,
+	HealthText = true,
+	ArmorBar = false,
+	Distance = true,
+	EquippedWeapon = false,
+
+	-- Indicators
+	OffScreenArrows = false,
+	Tracers = false,
+	Skeleton = false,
+
+	-- Chams & Highlights
+	Chams = true,
+	ChamsColor = Color3.fromRGB(186, 145, 252),
+	ChamsOutline = true,
+	ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
+	ThroughWalls = true,
+	RainbowMode = false,
+
+	-- Visual Settings
+	RenderDistance = 1500,
+	FontSize = 11,
+	AccentColor = Color3.fromRGB(186, 145, 252),
+}
+
+local CoreGui = (gethui and gethui()) or (cloneref and cloneref(game:GetService("CoreGui"))) or game:GetService("CoreGui")
+local Players = cloneref and cloneref(game:GetService("Players")) or game:GetService("Players")
+local lp = Players.LocalPlayer
+
+-- Clean previous container if re-executed
+local oldVisualsContainer = CoreGui:FindFirstChild("NVL_Visuals_Container")
+if oldVisualsContainer then
+	oldVisualsContainer:Destroy()
+end
+
+local VisualsFolder = Instance.new("Folder")
+VisualsFolder.Name = "NVL_Visuals_Container"
+VisualsFolder.Parent = CoreGui
+
+local function GetHealthColor(pct)
+	if pct > 0.5 then
+		return Color3.fromRGB(255, 200, 50):Lerp(Color3.fromRGB(60, 255, 120), (pct - 0.5) * 2)
+	else
+		return Color3.fromRGB(255, 65, 65):Lerp(Color3.fromRGB(255, 200, 50), pct * 2)
+	end
+end
+
+local function GetPlayerRelationColor(player, defaultColor)
+	if Spectators and Spectators.GetRelation then
+		local rel = Spectators.GetRelation(player.Name)
+		if rel == "Enemy" then
+			return Color3.fromRGB(255, 75, 75)
+		elseif rel == "Friendly" then
+			return Color3.fromRGB(80, 240, 120)
+		end
+	end
+	return defaultColor
+end
+
+local PlayerESPCache = {}
+
+local function CleanupPlayerESP(player)
+	local cache = PlayerESPCache[player]
+	if cache then
+		if cache.Connections then
+			for _, conn in ipairs(cache.Connections) do
+				pcall(function() conn:Disconnect() end)
+			end
+		end
+		if cache.Highlight and cache.Highlight.Parent then
+			cache.Highlight:Destroy()
+		end
+		if cache.BillboardGui and cache.BillboardGui.Parent then
+			cache.BillboardGui:Destroy()
+		end
+		PlayerESPCache[player] = nil
+	end
+end
+
+local function CreateOrUpdatePlayerESP(player)
+	if player == lp then return end
+	local char = player.Character
+	if not char then return end
+
+	local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum then return end
+
+	local existing = PlayerESPCache[player]
+	if existing and existing.Character == char and existing.Highlight and existing.Highlight.Parent then
+		return
+	end
+
+	CleanupPlayerESP(player)
+
+	local chamsFill = GetPlayerRelationColor(player, VisualsState.ChamsColor)
+	local boxStrokeColor = GetPlayerRelationColor(player, VisualsState.BoxColor)
+	local nameTextColor = GetPlayerRelationColor(player, VisualsState.NameColor)
+
+	-- 1. Native Highlight (0 FPS overhead - C++ engine GPU render)
+	local hl = Instance.new("Highlight")
+	hl.Name = player.Name .. "_HL"
+	hl.Adornee = char
+	hl.FillColor = chamsFill
+	hl.FillTransparency = 0.5
+	hl.OutlineColor = VisualsState.ChamsOutlineColor
+	hl.OutlineTransparency = VisualsState.ChamsOutline and 0 or 1
+	hl.DepthMode = VisualsState.ThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+	hl.Enabled = VisualsState.Enabled and VisualsState.Chams and (hum.Health > 0)
+	hl.Parent = VisualsFolder
+
+	-- 2. Native BillboardGui (0 FPS overhead - C++ engine GPU render)
+	local bbg = Instance.new("BillboardGui")
+	bbg.Name = player.Name .. "_BBG"
+	bbg.Adornee = hrp
+	bbg.Size = UDim2.new(4.2, 0, 5.8, 0)
+	bbg.StudsOffset = Vector3.new(0, -0.1, 0)
+	bbg.AlwaysOnTop = VisualsState.ThroughWalls
+	bbg.MaxDistance = VisualsState.RenderDistance
+	bbg.Enabled = VisualsState.Enabled and (hum.Health > 0)
+	bbg.Parent = VisualsFolder
+
+	-- Black Outline Wrapper
+	local outlineFrame = Instance.new("Frame")
+	outlineFrame.Name = "BoxOutline"
+	outlineFrame.Size = UDim2.new(1, 4, 1, 4)
+	outlineFrame.Position = UDim2.new(0, -2, 0, -2)
+	outlineFrame.BackgroundTransparency = 1
+	outlineFrame.Visible = VisualsState.Boxes and VisualsState.BoxOutline
+	outlineFrame.Parent = bbg
+
+	local outStroke = Instance.new("UIStroke")
+	outStroke.Color = Color3.fromRGB(0, 0, 0)
+	outStroke.Thickness = 1
+	outStroke.LineJoinMode = Enum.LineJoinMode.Miter
+	outStroke.Parent = outlineFrame
+
+	-- Main Bounding Box
+	local boxFrame = Instance.new("Frame")
+	boxFrame.Name = "Box"
+	boxFrame.Size = UDim2.new(1, 0, 1, 0)
+	boxFrame.BackgroundTransparency = VisualsState.FilledBox and VisualsState.FilledBoxTransparency or 1
+	boxFrame.BackgroundColor3 = VisualsState.FilledBoxColor
+	boxFrame.BorderSizePixel = 0
+	boxFrame.Visible = VisualsState.Boxes
+	boxFrame.Parent = bbg
+
+	local boxStroke = Instance.new("UIStroke")
+	boxStroke.Name = "BoxStroke"
+	boxStroke.Color = boxStrokeColor
+	boxStroke.Thickness = 1.5
+	boxStroke.LineJoinMode = Enum.LineJoinMode.Miter
+	boxStroke.Parent = boxFrame
+
+	-- Name Tag
+	local nameLbl = Instance.new("TextLabel")
+	nameLbl.Name = "NameLabel"
+	nameLbl.Size = UDim2.new(0, 240, 0, 16)
+	nameLbl.Position = UDim2.new(0.5, 0, 0, -18)
+	nameLbl.AnchorPoint = Vector2.new(0.5, 1)
+	nameLbl.BackgroundTransparency = 1
+	nameLbl.Font = Enum.Font.GothamBold
+	nameLbl.TextSize = VisualsState.FontSize
+	nameLbl.TextColor3 = nameTextColor
+	nameLbl.TextStrokeTransparency = 0.4
+	nameLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	nameLbl.Text = player.DisplayName
+	nameLbl.Visible = VisualsState.NameTags
+	nameLbl.Parent = bbg
+
+	-- Health Bar Frame
+	local hpFrame = Instance.new("Frame")
+	hpFrame.Name = "HealthBar"
+	hpFrame.Size = UDim2.new(0, 3, 1, 0)
+	hpFrame.Position = UDim2.new(0, -7, 0, 0)
+	hpFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+	hpFrame.BorderSizePixel = 0
+	hpFrame.Visible = VisualsState.HealthBar
+	hpFrame.Parent = bbg
+
+	local hpStroke = Instance.new("UIStroke")
+	hpStroke.Color = Color3.fromRGB(0, 0, 0)
+	hpStroke.Thickness = 1
+	hpStroke.Parent = hpFrame
+
+	local curHealth = math.max(hum.Health, 0)
+	local maxHealth = math.max(hum.MaxHealth, 1)
+	local pct = math.clamp(curHealth / maxHealth, 0, 1)
+
+	local hpFill = Instance.new("Frame")
+	hpFill.Name = "Fill"
+	hpFill.Size = UDim2.new(1, 0, pct, 0)
+	hpFill.Position = UDim2.new(0, 0, 1 - pct, 0)
+	hpFill.BackgroundColor3 = GetHealthColor(pct)
+	hpFill.BorderSizePixel = 0
+	hpFill.Parent = hpFrame
+
+	local hpText = Instance.new("TextLabel")
+	hpText.Name = "HealthText"
+	hpText.Size = UDim2.new(0, 20, 0, 12)
+	hpText.Position = UDim2.new(0, -22, 1 - pct, -6)
+	hpText.BackgroundTransparency = 1
+	hpText.Font = Enum.Font.GothamBold
+	hpText.TextSize = 9
+	hpText.TextColor3 = Color3.fromRGB(240, 240, 245)
+	hpText.TextStrokeTransparency = 0.5
+	hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	hpText.TextXAlignment = Enum.TextXAlignment.Right
+	hpText.Text = tostring(math.floor(curHealth))
+	hpText.Visible = VisualsState.HealthBar and VisualsState.HealthText
+	hpText.Parent = bbg
+
+	-- Weapon Label
+	local weaponLbl = Instance.new("TextLabel")
+	weaponLbl.Name = "WeaponLabel"
+	weaponLbl.Size = UDim2.new(0, 200, 0, 14)
+	weaponLbl.Position = UDim2.new(0.5, 0, 1, 4)
+	weaponLbl.AnchorPoint = Vector2.new(0.5, 0)
+	weaponLbl.BackgroundTransparency = 1
+	weaponLbl.Font = Enum.Font.GothamMedium
+	weaponLbl.TextSize = 9
+	weaponLbl.TextColor3 = Color3.fromRGB(200, 200, 210)
+	weaponLbl.TextStrokeTransparency = 0.5
+	weaponLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	local activeTool = char:FindFirstChildOfClass("Tool")
+	weaponLbl.Text = activeTool and ("[" .. activeTool.Name .. "]") or ""
+	weaponLbl.Visible = VisualsState.EquippedWeapon
+	weaponLbl.Parent = bbg
+
+	-- 100% Event-Driven Listeners (No polling loops!)
+	local connections = {}
+
+	local hpConn = hum.HealthChanged:Connect(function(newHp)
+		local newCur = math.max(newHp, 0)
+		local newMax = math.max(hum.MaxHealth, 1)
+		local newPct = math.clamp(newCur / newMax, 0, 1)
+
+		hpFill.Size = UDim2.new(1, 0, newPct, 0)
+		hpFill.Position = UDim2.new(0, 0, 1 - newPct, 0)
+		hpFill.BackgroundColor3 = GetHealthColor(newPct)
+
+		hpText.Text = tostring(math.floor(newCur))
+		hpText.Position = UDim2.new(0, -22, 1 - newPct, -6)
+
+		if newCur <= 0 then
+			hl.Enabled = false
+			bbg.Enabled = false
+		else
+			hl.Enabled = VisualsState.Enabled and VisualsState.Chams
+			bbg.Enabled = VisualsState.Enabled
+		end
+	end)
+	table.insert(connections, hpConn)
+
+	local diedConn = hum.Died:Connect(function()
+		hl.Enabled = false
+		bbg.Enabled = false
+	end)
+	table.insert(connections, diedConn)
+
+	local childAddConn = char.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			weaponLbl.Text = "[" .. child.Name .. "]"
+		end
+	end)
+	table.insert(connections, childAddConn)
+
+	local childRemConn = char.ChildRemoved:Connect(function(child)
+		if child:IsA("Tool") then
+			local remainingTool = char:FindFirstChildOfClass("Tool")
+			weaponLbl.Text = remainingTool and ("[" .. remainingTool.Name .. "]") or ""
+		end
+	end)
+	table.insert(connections, childRemConn)
+
+	PlayerESPCache[player] = {
+		Player = player,
+		Character = char,
+		Hrp = hrp,
+		Hum = hum,
+		Highlight = hl,
+		BillboardGui = bbg,
+		BoxOutlineFrame = outlineFrame,
+		BoxFrame = boxFrame,
+		BoxStroke = boxStroke,
+		NameLabel = nameLbl,
+		HealthBarFrame = hpFrame,
+		HealthFill = hpFill,
+		HealthText = hpText,
+		WeaponLabel = weaponLbl,
+		Connections = connections,
+	}
+end
+
+local function SetupPlayer(player)
+	if player == lp then return end
+
+	player.CharacterAdded:Connect(function(newChar)
+		task.delay(0.2, function()
+			if player.Parent then
+				CreateOrUpdatePlayerESP(player)
+			end
+		end)
+	end)
+
+	player.CharacterRemoving:Connect(function()
+		CleanupPlayerESP(player)
+	end)
+
+	if player.Character then
+		CreateOrUpdatePlayerESP(player)
+	end
+end
+
+local function RefreshAllESP()
+	for player, data in pairs(PlayerESPCache) do
+		if data and data.BillboardGui and data.BillboardGui.Parent then
+			local hum = data.Hum
+			local isAlive = hum and hum.Health > 0
+
+			local chamsFill = GetPlayerRelationColor(player, VisualsState.ChamsColor)
+			local boxStrokeColor = GetPlayerRelationColor(player, VisualsState.BoxColor)
+			local nameTextColor = GetPlayerRelationColor(player, VisualsState.NameColor)
+
+			-- Highlight
+			if data.Highlight and data.Highlight.Parent then
+				data.Highlight.Enabled = VisualsState.Enabled and VisualsState.Chams and isAlive
+				data.Highlight.FillColor = chamsFill
+				data.Highlight.OutlineColor = VisualsState.ChamsOutlineColor
+				data.Highlight.OutlineTransparency = VisualsState.ChamsOutline and 0 or 1
+				data.Highlight.DepthMode = VisualsState.ThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+			end
+
+			-- BillboardGui
+			data.BillboardGui.Enabled = VisualsState.Enabled and isAlive
+			data.BillboardGui.AlwaysOnTop = VisualsState.ThroughWalls
+			data.BillboardGui.MaxDistance = VisualsState.RenderDistance
+
+			-- Box & Outline
+			if data.BoxFrame and data.BoxFrame.Parent then
+				data.BoxFrame.Visible = VisualsState.Boxes
+				data.BoxFrame.BackgroundTransparency = VisualsState.FilledBox and VisualsState.FilledBoxTransparency or 1
+				data.BoxFrame.BackgroundColor3 = VisualsState.FilledBoxColor
+			end
+			if data.BoxStroke and data.BoxStroke.Parent then
+				data.BoxStroke.Color = boxStrokeColor
+			end
+			if data.BoxOutlineFrame and data.BoxOutlineFrame.Parent then
+				data.BoxOutlineFrame.Visible = VisualsState.Boxes and VisualsState.BoxOutline
+			end
+
+			-- Name Tag
+			if data.NameLabel and data.NameLabel.Parent then
+				data.NameLabel.Visible = VisualsState.NameTags
+				data.NameLabel.TextSize = VisualsState.FontSize
+				data.NameLabel.TextColor3 = nameTextColor
+			end
+
+			-- Health Bar
+			if data.HealthBarFrame and data.HealthBarFrame.Parent then
+				data.HealthBarFrame.Visible = VisualsState.HealthBar
+			end
+			if data.HealthText and data.HealthText.Parent then
+				data.HealthText.Visible = VisualsState.HealthBar and VisualsState.HealthText
+			end
+
+			-- Weapon
+			if data.WeaponLabel and data.WeaponLabel.Parent then
+				data.WeaponLabel.Visible = VisualsState.EquippedWeapon
+			end
+		end
+	end
+end
+
+-- Initialize ESP for current players
+for _, p in ipairs(Players:GetPlayers()) do
+	SetupPlayer(p)
+end
+
+Players.PlayerAdded:Connect(SetupPlayer)
+Players.PlayerRemoving:Connect(CleanupPlayerESP)
+
+-- Connect Spectator Relation Changed
+if Spectators and Spectators.SetOnRelationChanged then
+	Spectators.SetOnRelationChanged(function(targetName, relation)
+		RefreshAllESP()
+	end)
+end
+
+-- Throttled Background Thread for Distance & Rainbow Mode (0 FPS impact, 0.3s cycle)
+task.spawn(function()
+	while true do
+		task.wait(0.3)
+		if VisualsState.Enabled and (VisualsState.Distance or VisualsState.RainbowMode) then
+			local lpChar = lp and lp.Character
+			local lpHrp = lpChar and (lpChar:FindFirstChild("HumanoidRootPart") or lpChar:FindFirstChild("Head"))
+			local lpPos = lpHrp and lpHrp.Position
+
+			local rainbowColor = nil
+			if VisualsState.RainbowMode then
+				rainbowColor = Color3.fromHSV((tick() * 0.25) % 1, 0.8, 1)
+			end
+
+			for player, data in pairs(PlayerESPCache) do
+				if data and data.BillboardGui and data.BillboardGui.Parent then
+					if VisualsState.RainbowMode and data.Highlight then
+						data.Highlight.FillColor = rainbowColor
+					end
+
+					if data.NameLabel and data.NameLabel.Parent then
+						if VisualsState.Distance and lpPos and data.Hrp and data.Hrp.Parent then
+							local dist = (data.Hrp.Position - lpPos).Magnitude
+							data.NameLabel.Text = string.format("%s [%dm]", player.DisplayName, math.floor(dist))
+						else
+							data.NameLabel.Text = player.DisplayName
+						end
+					end
+				end
+			end
+		end
+	end
+end)
+
 -- Left Column: Card 1 - ESP Main
 local VisualsMainCard = PlayersTab:CreateCard({
 	Title = "ESP Main",
@@ -534,26 +972,45 @@ VisualsMainCard:CreateToggle({
 	Name = "Boxes",
 	Default = true,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(186, 145, 252),
-	Callback = function(v) print("[NVL-Win] Boxes:", v) end,
-	ColorCallback = function(c) print("[NVL-Win] Box Color:", c) end,
+	ColorValue = VisualsState.BoxColor,
+	Callback = function(v)
+		VisualsState.Boxes = v
+		RefreshAllESP()
+	end,
+	ColorCallback = function(c)
+		VisualsState.BoxColor = c
+		RefreshAllESP()
+	end,
 })
 VisualsMainCard:CreateToggle({
 	Name = "Filled Box",
 	Default = false,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(186, 145, 252),
-	Callback = function(v) print("[NVL-Win] Filled Box:", v) end,
+	ColorValue = VisualsState.FilledBoxColor,
+	Callback = function(v)
+		VisualsState.FilledBox = v
+		RefreshAllESP()
+	end,
+	ColorCallback = function(c)
+		VisualsState.FilledBoxColor = c
+		RefreshAllESP()
+	end,
 })
 VisualsMainCard:CreateToggle({
 	Name = "Box Outline",
 	Default = true,
-	Callback = function(v) print("[NVL-Win] Box Outline:", v) end,
+	Callback = function(v)
+		VisualsState.BoxOutline = v
+		RefreshAllESP()
+	end,
 })
 VisualsMainCard:CreateToggle({
 	Name = "Corner Box",
 	Default = false,
-	Callback = function(v) print("[NVL-Win] Corner Box:", v) end,
+	Callback = function(v)
+		VisualsState.CornerBox = v
+		RefreshAllESP()
+	end,
 })
 
 -- Left Column: Card 2 - Player Info
@@ -566,34 +1023,55 @@ PlayerInfoCard:CreateToggle({
 	Name = "Name Tags",
 	Default = true,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(240, 240, 245),
-	Callback = function(v) print("[NVL-Win] Name Tags:", v) end,
-	ColorCallback = function(c) print("[NVL-Win] Name Color:", c) end,
+	ColorValue = VisualsState.NameColor,
+	Callback = function(v)
+		VisualsState.NameTags = v
+		RefreshAllESP()
+	end,
+	ColorCallback = function(c)
+		VisualsState.NameColor = c
+		RefreshAllESP()
+	end,
 })
 PlayerInfoCard:CreateToggle({
 	Name = "Health Bar",
 	Default = true,
-	Callback = function(v) print("[NVL-Win] Health Bar:", v) end,
+	Callback = function(v)
+		VisualsState.HealthBar = v
+		RefreshAllESP()
+	end,
 })
 PlayerInfoCard:CreateToggle({
 	Name = "Health Text",
 	Default = true,
-	Callback = function(v) print("[NVL-Win] Health Text:", v) end,
+	Callback = function(v)
+		VisualsState.HealthText = v
+		RefreshAllESP()
+	end,
 })
 PlayerInfoCard:CreateToggle({
 	Name = "Armor Bar",
 	Default = false,
-	Callback = function(v) print("[NVL-Win] Armor Bar:", v) end,
+	Callback = function(v)
+		VisualsState.ArmorBar = v
+		RefreshAllESP()
+	end,
 })
 PlayerInfoCard:CreateToggle({
 	Name = "Distance",
 	Default = true,
-	Callback = function(v) print("[NVL-Win] Distance:", v) end,
+	Callback = function(v)
+		VisualsState.Distance = v
+		RefreshAllESP()
+	end,
 })
 PlayerInfoCard:CreateToggle({
 	Name = "Equipped Weapon",
 	Default = false,
-	Callback = function(v) print("[NVL-Win] Equipped Weapon:", v) end,
+	Callback = function(v)
+		VisualsState.EquippedWeapon = v
+		RefreshAllESP()
+	end,
 })
 
 -- Left Column: Card 3 - Indicators & Skeleton
@@ -634,26 +1112,45 @@ VisualsChamsCard:CreateToggle({
 	Name = "Highlight Chams",
 	Default = true,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(186, 145, 252),
-	Callback = function(v) print("[NVL-Win] Highlight Chams:", v) end,
-	ColorCallback = function(c) print("[NVL-Win] Chams Color:", c) end,
+	ColorValue = VisualsState.ChamsColor,
+	Callback = function(v)
+		VisualsState.Chams = v
+		RefreshAllESP()
+	end,
+	ColorCallback = function(c)
+		VisualsState.ChamsColor = c
+		RefreshAllESP()
+	end,
 })
 VisualsChamsCard:CreateToggle({
 	Name = "Chams Outline",
 	Default = true,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(255, 255, 255),
-	Callback = function(v) print("[NVL-Win] Chams Outline:", v) end,
+	ColorValue = VisualsState.ChamsOutlineColor,
+	Callback = function(v)
+		VisualsState.ChamsOutline = v
+		RefreshAllESP()
+	end,
+	ColorCallback = function(c)
+		VisualsState.ChamsOutlineColor = c
+		RefreshAllESP()
+	end,
 })
 VisualsChamsCard:CreateToggle({
 	Name = "Through Walls",
 	Default = true,
-	Callback = function(v) print("[NVL-Win] Through Walls:", v) end,
+	Callback = function(v)
+		VisualsState.ThroughWalls = v
+		RefreshAllESP()
+	end,
 })
 VisualsChamsCard:CreateToggle({
 	Name = "Rainbow Mode",
 	Default = false,
-	Callback = function(v) print("[NVL-Win] Rainbow Mode:", v) end,
+	Callback = function(v)
+		VisualsState.RainbowMode = v
+		RefreshAllESP()
+	end,
 })
 
 -- Right Column: Card 2 - Visual Effects
@@ -694,7 +1191,10 @@ VisualsSettingsCard:CreateSlider({
 	Max = 3000,
 	Default = 1500,
 	Decimals = 0,
-	Callback = function(v) print("[NVL-Win] Render Distance:", v) end,
+	Callback = function(v)
+		VisualsState.RenderDistance = v
+		RefreshAllESP()
+	end,
 })
 VisualsSettingsCard:CreateSlider({
 	Name = "ESP Font Size",
@@ -702,13 +1202,16 @@ VisualsSettingsCard:CreateSlider({
 	Max = 16,
 	Default = 11,
 	Decimals = 0,
-	Callback = function(v) print("[NVL-Win] ESP Font Size:", v) end,
+	Callback = function(v)
+		VisualsState.FontSize = v
+		RefreshAllESP()
+	end,
 })
 VisualsSettingsCard:CreateColorPicker({
 	Name = "Accent Color",
 	Default = Color3.fromRGB(186, 145, 252),
 	Callback = function(c)
-		print("[NVL-Win] New Accent:", c)
+		VisualsState.AccentColor = c
 	end,
 })
 

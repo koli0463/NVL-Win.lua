@@ -742,6 +742,10 @@ function MemoryUI:CreateSpectators(config)
 					nameLabel.TextColor3 = targetColor
 				end
 
+				if self._OnRelationChanged then
+					task.spawn(self._OnRelationChanged, targetName, opt.Text)
+				end
+
 				MemoryUI:Notify({
 					Title = "Spectators",
 					Content = targetName .. " set to " .. opt.Text,
@@ -1066,6 +1070,14 @@ function MemoryUI:CreateSpectators(config)
 				end
 			end
 			Populate(currentList)
+		end,
+		GetRelation = function(pName)
+			if not pName then return "Neutral" end
+			local cleanKey = string.lower(pName)
+			return playerRelations[cleanKey] or playerRelations[pName] or "Neutral"
+		end,
+		SetOnRelationChanged = function(cb)
+			self._OnRelationChanged = cb
 		end,
 	}
 end
