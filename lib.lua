@@ -243,6 +243,112 @@ function MemoryUI:Notify(config)
 end
 
 -- ========================================================================
+-- Config Management System
+-- ========================================================================
+function MemoryUI:EnsureConfigFolder()
+	if isfolder and not isfolder("uisimbl") then pcall(makefolder, "uisimbl") end
+	if isfolder and not isfolder("uisimbl/configs") then pcall(makefolder, "uisimbl/configs") end
+end
+
+function MemoryUI:GetConfigList()
+	self:EnsureConfigFolder()
+	local list = {}
+	if isfolder and isfolder("uisimbl/configs") and listfiles then
+		for _, file in ipairs(listfiles("uisimbl/configs")) do
+			local name = file:match("([^/\\]+)%.json$")
+			if name then
+				table.insert(list, name)
+			end
+		end
+	end
+	if #list == 0 then
+		table.insert(list, "default")
+	end
+	return list
+end
+
+function MemoryUI:SaveConfig(name)
+	if not name or name:gsub("%s+", "") == "" then
+		self:Notify({ Title = "Config", Content = "Please enter a valid config name!", Duration = 2 })
+		return false
+	end
+	name = name:gsub("[^%w_%-]", "")
+	self:EnsureConfigFolder()
+	local data = {}
+	for flag, obj in pairs(self.Flags) do
+		pcall(function()
+			data[flag] = obj.Get()
+		end)
+	end
+	local encoded = HttpService:JSONEncode(data)
+	if writefile then
+		writefile("uisimbl/configs/" .. name .. ".json", encoded)
+	end
+	self:Notify({ Title = "Config", Content = "Saved config: " .. name, Duration = 2.5 })
+	return true
+end
+
+function MemoryUI:LoadConfig(name)
+	if not name or name == "" then return false end
+	name = name:gsub("[^%w_%-]", "")
+	local path = "uisimbl/configs/" .. name .. ".json"
+	if isfile and isfile(path) then
+		local ok, decoded = pcall(function()
+			return HttpService:JSONDecode(readfile(path))
+		end)
+		if ok and type(decoded) == "table" then
+			for flag, val in pairs(decoded) do
+				if self.Flags[flag] and self.Flags[flag].Set then
+					pcall(self.Flags[flag].Set, val)
+				end
+			end
+			self:Notify({ Title = "Config", Content = "Loaded config: " .. name, Duration = 2.5 })
+			return true
+		end
+	end
+	self:Notify({ Title = "Config", Content = "Config not found: " .. name, Duration = 2 })
+	return false
+end
+
+function MemoryUI:DeleteConfig(name)
+	if not name or name == "" then return false end
+	name = name:gsub("[^%w_%-]", "")
+	local path = "uisimbl/configs/" .. name .. ".json"
+	if isfile and isfile(path) and delfile then
+		delfile(path)
+		if isfile("uisimbl/autoload.txt") then
+			local auto = readfile("uisimbl/autoload.txt"):gsub("%s+", "")
+			if auto == name then
+				delfile("uisimbl/autoload.txt")
+			end
+		end
+		self:Notify({ Title = "Config", Content = "Deleted config: " .. name, Duration = 2.5 })
+		return true
+	end
+	self:Notify({ Title = "Config", Content = "Could not delete: " .. name, Duration = 2 })
+	return false
+end
+
+function MemoryUI:SetAutoload(name)
+	if not name or name == "" then return false end
+	name = name:gsub("[^%w_%-]", "")
+	self:EnsureConfigFolder()
+	if writefile then
+		writefile("uisimbl/autoload.txt", name)
+	end
+	self:Notify({ Title = "Config", Content = "Set '" .. name .. "' as AutoLoad!", Duration = 2.5 })
+	return true
+end
+
+function MemoryUI:GetAutoload()
+	if isfile and isfile("uisimbl/autoload.txt") then
+		local name = readfile("uisimbl/autoload.txt"):gsub("%s+", "")
+		if name ~= "" then return name end
+	end
+	return nil
+end
+
+-- ========================================================================
 -- Live Watermark: PANDORA | LOBBY | 144FPS | 65PING | 12:15PM
 -- ========================================================================
 function MemoryUI:CreateWatermark(config)
@@ -458,31 +564,37 @@ function MemoryUI:CreateSpectators(config)
 	local currentList = {}
 	local playerRelations = {}
 	local ActiveContextMenu = nil
+	local ActiveBackdrop = nil
 
 	local function CloseContextMenu()
 		if ActiveContextMenu and ActiveContextMenu.Parent then
 			ActiveContextMenu:Destroy()
 			ActiveContextMenu = nil
 		end
-	end
-
-	-- Dismiss context menu when clicking outside
-	UserInputService.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then
-			if ActiveContextMenu and ActiveContextMenu.Parent then
-				local mouseLoc = UserInputService:GetMouseLocation()
-				local mPos = ActiveContextMenu.AbsolutePosition
-				local mSize = ActiveContextMenu.AbsoluteSize
-				if mouseLoc.X < mPos.X or mouseLoc.X > mPos.X + mSize.X or mouseLoc.Y < mPos.Y or mouseLoc.Y > mPos.Y + mSize.Y then
-					-- Delay slightly so newly triggered context menus aren't immediately closed
-					task.defer(CloseContextMenu)
-				end
-			end
+		if ActiveBackdrop and ActiveBackdrop.Parent then
+			ActiveBackdrop:Destroy()
+			ActiveBackdrop = nil
 		end
-	end)
+	end
 
 	local function OpenPlayerContextMenu(targetName, nameLabel, mousePos)
 		CloseContextMenu()
+
+		-- Invisible backdrop catches clicks outside the menu to dismiss it 100% reliably
+		local Backdrop = Create("TextButton", {
+			Name = "ContextMenuBackdrop",
+			Parent = self.ScreenGui,
+			Size = UDim2.new(1, 0, 1, 0),
+			Position = UDim2.new(0, 0, 0, 0),
+			BackgroundTransparency = 1,
+			Text = "",
+			AutoButtonColor = false,
+			ZIndex = 499,
+		})
+		Backdrop.MouseButton1Click:Connect(CloseContextMenu)
+		Backdrop.MouseButton2Click:Connect(CloseContextMenu)
+		ActiveBackdrop = Backdrop
+
 		local mouseLoc = UserInputService:GetMouseLocation()
 		local guiInset = Vector2.zero
 		pcall(function()
@@ -548,14 +660,28 @@ function MemoryUI:CreateSpectators(config)
 			end)
 
 			btn.MouseButton1Click:Connect(function()
+				local cleanKey = targetName:lower()
+				playerRelations[cleanKey] = opt.Text
 				playerRelations[targetName] = opt.Text
+
+				local targetColor = Theme.TextBright
 				if opt.Text == "Enemy" then
-					nameLabel.TextColor3 = Color3.fromRGB(240, 75, 75)
+					targetColor = Color3.fromRGB(255, 75, 75)
 				elseif opt.Text == "Friendly" then
-					nameLabel.TextColor3 = Color3.fromRGB(90, 225, 110)
+					targetColor = Color3.fromRGB(80, 240, 120)
 				else
-					nameLabel.TextColor3 = Theme.TextBright
+					targetColor = Theme.TextBright
 				end
+
+				if nameLabel and nameLabel.Parent then
+					nameLabel.TextColor3 = targetColor
+				end
+
+				MemoryUI:Notify({
+					Title = "Spectators",
+					Content = targetName .. " set to " .. opt.Text,
+					Duration = 2,
+				})
 				CloseContextMenu()
 			end)
 		end
@@ -626,16 +752,17 @@ function MemoryUI:CreateSpectators(config)
 				else
 					uid = math.abs(tonumber(string.byte(name, 1) or 1) * 31337) % 50000000 + 1
 				end
-				local modes = { "Watching", "1st Person", "3rd Person" }
-				mode = modes[(i % #modes) + 1]
+				mode = "Watching"
 			end
 
-			local rel = playerRelations[name] or "Neutral"
+			mode = "Watching"
+
+			local rel = playerRelations[name:lower()] or playerRelations[name] or "Neutral"
 			local nameColor = Theme.TextBright
 			if rel == "Enemy" then
-				nameColor = Color3.fromRGB(240, 75, 75)
+				nameColor = Color3.fromRGB(255, 75, 75)
 			elseif rel == "Friendly" then
-				nameColor = Color3.fromRGB(90, 225, 110)
+				nameColor = Color3.fromRGB(80, 240, 120)
 			end
 
 			local row = Create("TextButton", {
@@ -673,11 +800,12 @@ function MemoryUI:CreateSpectators(config)
 				TextSize = 10.5,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextTruncate = Enum.TextTruncate.AtEnd,
+				Active = false,
 				ZIndex = 83,
 			})
 
-			-- @Username Label
-			Create("TextLabel", {
+			-- @Username Label (Hover auto-copies UserId to clipboard)
+			local UserLabel = Create("TextLabel", {
 				Parent = row,
 				Size = UDim2.new(0, 95, 0, 12),
 				Position = UDim2.new(0, 38, 0, 17),
@@ -688,13 +816,51 @@ function MemoryUI:CreateSpectators(config)
 				TextSize = 9,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextTruncate = Enum.TextTruncate.AtEnd,
+				Active = true,
 				ZIndex = 83,
 			})
 
-			-- Right Click Context Menu Handler on Row
+			local lastCopiedTime = 0
+			UserLabel.MouseEnter:Connect(function()
+				local now = tick()
+				if now - lastCopiedTime > 1.2 then
+					lastCopiedTime = now
+					local idStr = tostring(uid)
+					pcall(function()
+						if setclipboard then
+							setclipboard(idStr)
+						elseif toclipboard then
+							toclipboard(idStr)
+						end
+					end)
+					Tween(UserLabel, TweenInfo.new(0.15), { TextColor3 = Theme.Accent })
+					MemoryUI:Notify({
+						Title = "Clipboard",
+						Content = "Copied UserId " .. idStr .. " (@" .. name .. ")",
+						Duration = 1.5,
+					})
+				end
+			end)
+			UserLabel.MouseLeave:Connect(function()
+				Tween(UserLabel, TweenInfo.new(0.15), { TextColor3 = Color3.fromRGB(115, 115, 125) })
+			end)
+
+			-- Right Click Context Menu Handler (Row & Labels)
+			local function HandleRightClick(pos)
+				OpenPlayerContextMenu(name, DisplayLabel, pos)
+			end
+
 			row.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton2 then
-					OpenPlayerContextMenu(name, DisplayLabel, input.Position)
+					HandleRightClick(input.Position)
+				end
+			end)
+			row.MouseButton2Click:Connect(function()
+				HandleRightClick(UserInputService:GetMouseLocation())
+			end)
+			UserLabel.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton2 then
+					HandleRightClick(input.Position)
 				end
 			end)
 
@@ -2432,10 +2598,20 @@ function MemoryUI:CreateWindow(config)
 				end
 
 				Pill.MouseButton1Click:Connect(function() SetState(not currentState) end)
-				return {
-					Set = SetState,
+
+				local toggleObj = {
+					Set = function(v) SetState(v == true) end,
 					Get = function() return currentState end,
 				}
+
+				local flagKey = toggleConfig.Flag or toggleName
+				MemoryUI.Flags[flagKey] = {
+					Type = "Toggle",
+					Get = toggleObj.Get,
+					Set = toggleObj.Set,
+				}
+
+				return toggleObj
 			end
 
 			-- ============================================================
@@ -2696,14 +2872,23 @@ function MemoryUI:CreateWindow(config)
 				end)
 				table.insert(MemoryUI.Connections, endConn)
 
-				return {
+				local sliderObj = {
 					Set = function(val)
-						currentValue = math.clamp(val, minVal, maxVal)
+						currentValue = math.clamp(tonumber(val) or defaultVal, minVal, maxVal)
 						ValueInput.Text = string.format("%." .. decimals .. "f", currentValue)
 						UpdateSlider(0, true)
 					end,
 					Get = function() return currentValue end,
 				}
+
+				local flagKey = sliderConfig.Flag or sliderName
+				MemoryUI.Flags[flagKey] = {
+					Type = "Slider",
+					Get = sliderObj.Get,
+					Set = sliderObj.Set,
+				}
+
+				return sliderObj
 			end
 
 			-- ============================================================
@@ -2858,7 +3043,7 @@ function MemoryUI:CreateWindow(config)
 					Tween(Stroke, TweenInfo.new(0.2), { Color = isOpen and Theme.Accent or Color3.fromRGB(24, 26, 32) })
 				end)
 
-				return {
+				local dropObj = {
 					Set = function(opt)
 						selected = opt
 						SelectLabel.Text = tostring(selected)
@@ -2866,7 +3051,24 @@ function MemoryUI:CreateWindow(config)
 						pcall(callback, selected)
 					end,
 					Get = function() return selected end,
+					SetOptions = function(newOpts)
+						options = newOpts or {}
+						if not table.find(options, selected) then
+							selected = options[1] or ""
+							SelectLabel.Text = tostring(selected)
+						end
+						Populate()
+					end,
 				}
+
+				local flagKey = dropdownConfig.Flag or dropName
+				MemoryUI.Flags[flagKey] = {
+					Type = "Dropdown",
+					Get = dropObj.Get,
+					Set = dropObj.Set,
+				}
+
+				return dropObj
 			end
 
 			-- ============================================================
@@ -2927,7 +3129,15 @@ function MemoryUI:CreateWindow(config)
 			function Card:CreateCenteredBox(boxConfig)
 				boxConfig = boxConfig or {}
 				local text = boxConfig.Text or "Example"
+				local isDanger = (boxConfig.Danger == true) or (boxConfig.Red == true) or (boxConfig.Color == "Red")
 				local callback = boxConfig.Callback or function() end
+
+				local defaultBg = isDanger and Color3.fromRGB(28, 14, 16) or Color3.fromRGB(15, 16, 19)
+				local hoverBg = isDanger and Color3.fromRGB(45, 18, 22) or Color3.fromRGB(20, 22, 27)
+				local defaultTextCol = isDanger and Color3.fromRGB(240, 75, 75) or (boxConfig.TextColor or Theme.TextMuted)
+				local hoverTextCol = isDanger and Color3.fromRGB(255, 95, 95) or Theme.TextBright
+				local defaultStroke = isDanger and Color3.fromRGB(90, 28, 35) or Color3.fromRGB(24, 26, 32)
+				local hoverStroke = isDanger and Color3.fromRGB(160, 45, 55) or Color3.fromRGB(45, 45, 55)
 
 				local Row = Create("Frame", {
 					Parent = ItemsContainer,
@@ -2941,34 +3151,32 @@ function MemoryUI:CreateWindow(config)
 					Parent = Row,
 					Size = UDim2.new(1, -24, 0, 28),
 					Position = UDim2.new(0, 12, 0.5, -14),
-					BackgroundColor3 = Color3.fromRGB(15, 16, 19),
+					BackgroundColor3 = defaultBg,
 					BorderSizePixel = 0,
 					Font = Enum.Font.GothamMedium,
 					Text = text,
-					TextColor3 = Theme.TextMuted,
+					TextColor3 = defaultTextCol,
 					TextSize = 11,
 					AutoButtonColor = false,
 					ZIndex = 4,
 				})
 				Create("UICorner", { CornerRadius = UDim.new(0, 7), Parent = Box })
-				local Stroke = Create("UIStroke", { Parent = Box, Color = Color3.fromRGB(24, 26, 32), Thickness = 1 })
+				local Stroke = Create("UIStroke", { Parent = Box, Color = defaultStroke, Thickness = 1 })
 
 				Box.MouseEnter:Connect(function()
-					Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(20, 22, 27) })
-					Tween(Box, TweenInfo.new(0.15), { TextColor3 = Theme.TextBright })
-					Tween(Stroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(45, 45, 55) })
+					Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = hoverBg, TextColor3 = hoverTextCol })
+					Tween(Stroke, TweenInfo.new(0.15), { Color = hoverStroke })
 				end)
 				Box.MouseLeave:Connect(function()
-					Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(15, 16, 19) })
-					Tween(Box, TweenInfo.new(0.15), { TextColor3 = Theme.TextMuted })
-					Tween(Stroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(24, 26, 32) })
+					Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = defaultBg, TextColor3 = defaultTextCol })
+					Tween(Stroke, TweenInfo.new(0.15), { Color = defaultStroke })
 				end)
 				Box.MouseButton1Click:Connect(function()
-					Tween(Box, TweenInfo.new(0.08), { BackgroundColor3 = Theme.Accent })
-					Tween(Box, TweenInfo.new(0.08), { TextColor3 = Color3.fromRGB(15, 15, 18) })
+					local clickBg = isDanger and Color3.fromRGB(200, 40, 50) or Theme.Accent
+					local clickText = isDanger and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(15, 15, 18)
+					Tween(Box, TweenInfo.new(0.08), { BackgroundColor3 = clickBg, TextColor3 = clickText })
 					task.wait(0.1)
-					Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(20, 22, 27) })
-					Tween(Box, TweenInfo.new(0.15), { TextColor3 = Theme.TextBright })
+					Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = hoverBg, TextColor3 = hoverTextCol })
 					pcall(callback)
 				end)
 

@@ -55,11 +55,11 @@ local Watermark = Window:CreateWatermark({
 })
 
 local initialSpectators = {
-	{ Name = "Raxxys", DisplayName = "Raxxys", UserId = 10542009861, Mode = "1st Person" },
-	{ Name = "Sammill", DisplayName = "Sammill", UserId = 1138506088, Mode = "3rd Person" },
+	{ Name = "Raxxys", DisplayName = "Raxxys", UserId = 10542009861, Mode = "Watching" },
+	{ Name = "Sammill", DisplayName = "Sammill", UserId = 1138506088, Mode = "Watching" },
 	{ Name = "Johhnyy", DisplayName = "Johhnyy", UserId = 1284562089, Mode = "Watching" },
-	{ Name = "killstroy", DisplayName = "killstroy", UserId = 1849203847, Mode = "1st Person" },
-	{ Name = "Anton Var", DisplayName = "Anton Var", UserId = 1981141314, Mode = "3rd Person" },
+	{ Name = "killstroy", DisplayName = "killstroy", UserId = 1849203847, Mode = "Watching" },
+	{ Name = "Anton Var", DisplayName = "Anton Var", UserId = 1981141314, Mode = "Watching" },
 	{ Name = "Layla1970", DisplayName = "Layla1970", UserId = 2039485721, Mode = "Watching" },
 }
 
@@ -568,23 +568,99 @@ HUDCard:CreateToggle({
 	end,
 })
 
-local ActionsCard = ConfigTab:CreateCard({
-	Title = "Actions",
+local ConfigCard = ConfigTab:CreateCard({
+	Title = "Config Manager",
 	Side = "right",
 	Icon = MemoryAssets.Icons.gear or "",
 })
-ActionsCard:CreateCenteredBox({
-	Text = "Save Config",
-	Callback = function()
-		print("[NVL-Win] Config Saved!")
-		MemoryUI:Notify({ Title = "Config", Content = "Successfully saved active configuration!", Duration = 3 })
+
+local selectedConfig = "default"
+local enteredConfigName = ""
+local ConfigDropdown = nil
+
+local function RefreshConfigs()
+	local list = MemoryUI:GetConfigList()
+	if ConfigDropdown and ConfigDropdown.SetOptions then
+		ConfigDropdown.SetOptions(list)
+	end
+end
+
+ConfigDropdown = ConfigCard:CreateDropdown({
+	Name = "Select Config",
+	Options = MemoryUI:GetConfigList(),
+	Default = "default",
+	Callback = function(cfg)
+		selectedConfig = cfg
+		print("[NVL-Win] Selected config:", cfg)
 	end,
 })
-ActionsCard:CreateInput({
-	Placeholder = "Config name...",
+
+ConfigCard:CreateInput({
+	Placeholder = "New config name...",
 	Callback = function(txt)
-		print("[NVL-Win] Config name entered:", txt)
+		enteredConfigName = txt
 	end,
 })
+
+-- 1. Save Button (Saves new or current config)
+ConfigCard:CreateButton({
+	Text = "Save",
+	Callback = function()
+		local targetName = (enteredConfigName ~= "" and enteredConfigName) or selectedConfig
+		if MemoryUI:SaveConfig(targetName) then
+			selectedConfig = targetName
+			RefreshConfigs()
+		end
+	end,
+})
+
+-- 2. Delete Button (RED danger button)
+ConfigCard:CreateButton({
+	Text = "Delete",
+	Danger = true,
+	Red = true,
+	Callback = function()
+		if MemoryUI:DeleteConfig(selectedConfig) then
+			selectedConfig = "default"
+			RefreshConfigs()
+		end
+	end,
+})
+
+-- 3. Update Button (Overwrites currently selected config)
+ConfigCard:CreateButton({
+	Text = "Update",
+	Callback = function()
+		if MemoryUI:SaveConfig(selectedConfig) then
+			MemoryUI:Notify({ Title = "Config", Content = "Updated config: " .. selectedConfig, Duration = 2 })
+		end
+	end,
+})
+
+-- 4. Set Autoload Button
+ConfigCard:CreateButton({
+	Text = "Set Autoload",
+	Callback = function()
+		MemoryUI:SetAutoload(selectedConfig)
+	end,
+})
+
+-- 5. Load Button
+ConfigCard:CreateButton({
+	Text = "Load",
+	Callback = function()
+		MemoryUI:LoadConfig(selectedConfig)
+	end,
+})
+
+-- Auto-Load Config if set
+task.spawn(function()
+	task.wait(0.5)
+	local autoCfg = MemoryUI:GetAutoload()
+	if autoCfg then
+		print("[NVL-Win] Auto-loading config:", autoCfg)
+		MemoryUI:LoadConfig(autoCfg)
+	end
+end)
 
 print("[NVL-Win] Neverlose / Memory UI initialized with 100% precision!")
