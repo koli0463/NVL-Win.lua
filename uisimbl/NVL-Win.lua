@@ -194,6 +194,196 @@ local ConfigTab = Window:CreateTab({
 })
 
 -- ========================================================================
+-- Combat & Silent Aim Engine (New Method - Universal Hook & FOV)
+-- ========================================================================
+local CombatState = {
+	Enabled = true,
+	SilentAim = false,
+	AutoFire = false,
+	AutoRevolver = false,
+	AntiStep = true,
+	Backtracking = 100,
+	DrawFOV = true,
+	VisibleFOV = true,
+	FOVRadius = 150,
+	FOVColor = Color3.fromRGB(186, 145, 252),
+	Hitchance = 100,
+	VisibleCheck = true,
+	Autowall = false,
+	PrioritizeLowHealth = true,
+	IgnoreFriends = true,
+	MaxDistance = 500,
+	TargetPart = "HumanoidRootPart",
+	BodyAimbotMode = "Head, Body, Chest, Neck",
+	Prediction = 0.135,
+	FirstBulletDelay = 0,
+	AfterKillDelay = 500,
+	TeleportBoost = false,
+}
+
+local CurrentTarget = nil
+local CurrentTargetPart = nil
+
+local CoreGui = (gethui and gethui()) or (cloneref and cloneref(game:GetService("CoreGui"))) or game:GetService("CoreGui")
+local UserInputService = cloneref and cloneref(game:GetService("UserInputService")) or game:GetService("UserInputService")
+local RunService = cloneref and cloneref(game:GetService("RunService")) or game:GetService("RunService")
+local Players = cloneref and cloneref(game:GetService("Players")) or game:GetService("Players")
+local Workspace = cloneref and cloneref(game:GetService("Workspace")) or game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+local lp = Players.LocalPlayer
+
+local oldFovGui = CoreGui:FindFirstChild("NVL_FOV_Container")
+if oldFovGui then oldFovGui:Destroy() end
+
+local FOVGui = Instance.new("ScreenGui")
+FOVGui.Name = "NVL_FOV_Container"
+FOVGui.ResetOnSpawn = false
+FOVGui.Parent = CoreGui
+
+local FOVCircle = Instance.new("Frame")
+FOVCircle.Name = "FOVCircle"
+FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVCircle.Size = UDim2.new(0, CombatState.FOVRadius * 2, 0, CombatState.FOVRadius * 2)
+FOVCircle.BackgroundTransparency = 1
+FOVCircle.Visible = CombatState.Enabled and CombatState.DrawFOV
+FOVCircle.Parent = FOVGui
+
+local FOVStroke = Instance.new("UIStroke")
+FOVStroke.Thickness = 1.5
+FOVStroke.Color = CombatState.FOVColor
+FOVStroke.Transparency = 0.2
+FOVStroke.Parent = FOVCircle
+
+local FOVCorner = Instance.new("UICorner")
+FOVCorner.CornerRadius = UDim.new(1, 0)
+FOVCorner.Parent = FOVCircle
+
+local function UpdateFOVCircle()
+	if FOVCircle and FOVCircle.Parent then
+		local mousePos = UserInputService:GetMouseLocation()
+		FOVCircle.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y)
+		FOVCircle.Size = UDim2.new(0, CombatState.FOVRadius * 2, 0, CombatState.FOVRadius * 2)
+		FOVCircle.Visible = CombatState.Enabled and CombatState.DrawFOV and CombatState.VisibleFOV
+		if FOVStroke then
+			FOVStroke.Color = CombatState.FOVColor
+		end
+	end
+end
+
+-- Target Selection (New Method: Priority scoring + wall check)
+local function GetClosestTarget()
+	if not CombatState.Enabled then return nil, nil end
+	local mousePos = UserInputService:GetMouseLocation()
+	local bestTarget = nil
+	local bestPart = nil
+	local bestScore = math.huge
+	local camPos = Camera and Camera.CFrame.Position or Vector3.zero
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= lp and player.Character then
+			local char = player.Character
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			local hrp = char:FindFirstChild("HumanoidRootPart")
+			local head = char:FindFirstChild("Head")
+
+			if hum and hum.Health > 0 and (hrp or head) then
+				if CombatState.IgnoreFriends and Spectators and Spectators.GetRelation then
+					local rel = Spectators.GetRelation(player.Name)
+					if rel == "Friendly" then
+						continue
+					end
+				end
+
+				local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+				local partPos = targetPart.Position
+				local distToPlayer = (camPos - partPos).Magnitude
+
+				if distToPlayer <= CombatState.MaxDistance then
+					local screenPos, onScreen = Camera:WorldToViewportPoint(partPos)
+					if onScreen then
+						local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+						if screenDist <= CombatState.FOVRadius then
+							local isVisible = true
+							if CombatState.VisibleCheck and not CombatState.Autowall then
+								local rayParams = RaycastParams.new()
+								rayParams.FilterType = Enum.RaycastFilterType.Exclude
+								rayParams.FilterDescendantsInstances = { lp.Character, char }
+								local rayResult = Workspace:Raycast(camPos, partPos - camPos, rayParams)
+								if rayResult then
+									isVisible = false
+								end
+							end
+
+							if isVisible then
+								local score = screenDist
+								if CombatState.PrioritizeLowHealth then
+									score = score * (hum.Health / math.max(hum.MaxHealth, 1))
+								end
+								if score < bestScore then
+									bestScore = score
+									bestTarget = player
+									bestPart = targetPart
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return bestTarget, bestPart
+end
+
+-- Update Loop for Combat (RenderStepped)
+RunService.RenderStepped:Connect(function()
+	UpdateFOVCircle()
+	CurrentTarget, CurrentTargetPart = GetClosestTarget()
+
+	if CombatState.Enabled and CombatState.AutoFire and CurrentTarget and CurrentTargetPart then
+		local char = lp.Character
+		local tool = char and char:FindFirstChildOfClass("Tool")
+		if tool then
+			tool:Activate()
+		end
+	end
+end)
+
+-- Silent Aim Hooking (New Method: namecall interception)
+pcall(function()
+	if hookmetamethod then
+		local oldNamecall
+		oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+			local method = getnamecallmethod()
+			local args = { ... }
+
+			if not checkcaller() and CombatState.Enabled and CombatState.SilentAim and CurrentTarget and CurrentTargetPart then
+				if math.random(1, 100) <= CombatState.Hitchance then
+					local predPos = CurrentTargetPart.Position + (CurrentTargetPart.Velocity * CombatState.Prediction)
+
+					if method == "FireServer" and tostring(self) == "MainEvent" and args[1] == "UpdateMousePos" then
+						args[2] = predPos
+						return oldNamecall(self, unpack(args))
+					end
+
+					if method == "FireServer" and (string.find(tostring(self):lower(), "shoot") or string.find(tostring(self):lower(), "fire") or string.find(tostring(self):lower(), "hit") or string.find(tostring(self):lower(), "bullet")) then
+						for i, v in ipairs(args) do
+							if typeof(v) == "Vector3" then
+								args[i] = predPos
+								break
+							end
+						end
+						return oldNamecall(self, unpack(args))
+					end
+				end
+			end
+
+			return oldNamecall(self, ...)
+		end)
+	end
+end)
+
+-- ========================================================================
 -- Populate General Tab (Exact Replica of Reference Mockup)
 -- ========================================================================
 
@@ -215,7 +405,8 @@ CardGeneral:CreateToggle({
 	Mode = "Toggle",
 	ShowInBinds = true,
 	Callback = function(v)
-		print("[NVL-Win] General Enable:", v)
+		CombatState.Enabled = v
+		UpdateFOVCircle()
 	end,
 })
 
@@ -227,7 +418,7 @@ CardGeneral:CreateToggle({
 	Mode = "Hold",
 	ShowInBinds = true,
 	Callback = function(v)
-		print("[NVL-Win] Auto Fire:", v)
+		CombatState.AutoFire = v
 	end,
 })
 
@@ -235,7 +426,7 @@ CardGeneral:CreateToggle({
 	Name = "Silent Aim",
 	Default = false,
 	Callback = function(v)
-		print("[NVL-Win] Silent Aim:", v)
+		CombatState.SilentAim = v
 	end,
 })
 
@@ -243,7 +434,7 @@ CardGeneral:CreateToggle({
 	Name = "Auto Revolver",
 	Default = false,
 	Callback = function(v)
-		print("[NVL-Win] Auto Revolver:", v)
+		CombatState.AutoRevolver = v
 	end,
 })
 
@@ -251,7 +442,7 @@ CardGeneral:CreateToggle({
 	Name = "Anti Step",
 	Default = true,
 	Callback = function(v)
-		print("[NVL-Win] Anti Step:", v)
+		CombatState.AntiStep = v
 	end,
 })
 
@@ -262,7 +453,7 @@ CardGeneral:CreateSlider({
 	Default = 100,
 	Decimals = 2,
 	Callback = function(v)
-		print("[NVL-Win] Backtracking:", v)
+		CombatState.Backtracking = v
 	end,
 })
 
@@ -272,9 +463,14 @@ CardGeneral:CreateToggle({
 	HasSettings = true,
 	Keybind = Enum.KeyCode.X,
 	ColorBadge = true,
-	ColorValue = Color3.fromRGB(186, 145, 252),
+	ColorValue = CombatState.FOVColor,
 	Callback = function(v)
-		print("[NVL-Win] Draw FOV:", v)
+		CombatState.DrawFOV = v
+		UpdateFOVCircle()
+	end,
+	ColorCallback = function(c)
+		CombatState.FOVColor = c
+		UpdateFOVCircle()
 	end,
 })
 
@@ -291,7 +487,7 @@ CardAccuracy:CreateDropdown({
 	Options = { "Selection", "Raycast", "Hitbox" },
 	Default = "Selection",
 	Callback = function(opt)
-		print("[NVL-Win] Visible filter:", opt)
+		CombatState.VisibleCheck = (opt == "Raycast" or opt == "Selection")
 	end,
 })
 
@@ -318,7 +514,7 @@ CardAccuracy:CreateDropdown({
 	Options = { "Head, Body, Chest, Neck", "Head Only", "Chest Only", "Pelvis Only" },
 	Default = "Head, Body, Chest, Neck",
 	Callback = function(opt)
-		print("[NVL-Win] Body Aimbot:", opt)
+		CombatState.BodyAimbotMode = opt
 	end,
 })
 
@@ -345,7 +541,8 @@ CardMisc:CreateToggle({
 	Name = "Visible FOV",
 	Default = true,
 	Callback = function(v)
-		print("[NVL-Win] Visible FOV:", v)
+		CombatState.VisibleFOV = v
+		UpdateFOVCircle()
 	end,
 })
 
@@ -363,11 +560,11 @@ CardExploits:CreateSlider({
 	Name = "Hitchance",
 	Min = 0,
 	Max = 100,
-	Default = 50,
+	Default = 100,
 	Decimals = 0,
 	Suffix = "%",
 	Callback = function(v)
-		print("[NVL-Win] Hitchance:", v)
+		CombatState.Hitchance = v
 	end,
 })
 
@@ -400,7 +597,7 @@ CardExploits:CreateToggle({
 	Name = "Teleport Boost",
 	Default = true,
 	Callback = function(v)
-		print("[NVL-Win] Teleport Boost:", v)
+		CombatState.TeleportBoost = v
 	end,
 })
 
@@ -419,7 +616,7 @@ CardSettings:CreateSlider({
 	Default = 0,
 	Decimals = 0,
 	Callback = function(v)
-		print("[NVL-Win] First Bullet Delay:", v)
+		CombatState.FirstBulletDelay = v
 	end,
 })
 
@@ -430,7 +627,7 @@ CardSettings:CreateSlider({
 	Default = 500,
 	Decimals = 0,
 	Callback = function(v)
-		print("[NVL-Win] After Kill:", v)
+		CombatState.AfterKillDelay = v
 	end,
 })
 
@@ -452,7 +649,7 @@ CardSettings:CreateSlider({
 	Default = 50.0,
 	Decimals = 1,
 	Callback = function(v)
-		print("[NVL-Win] Autowall:", v)
+		CombatState.Autowall = (v > 0)
 	end,
 })
 
@@ -497,9 +694,29 @@ local CardEnemyTarget = GeneralTab:CreateCard({
 	Icon = MemoryAssets.Icons.target_fill or "",
 	SubTab = "Enemy",
 })
-CardEnemyTarget:CreateToggle({ Name = "Prioritize Low Health", Default = true })
-CardEnemyTarget:CreateToggle({ Name = "Ignore Friends", Default = true })
-CardEnemyTarget:CreateSlider({ Name = "Target Distance Max", Min = 50, Max = 1000, Default = 500 })
+CardEnemyTarget:CreateToggle({
+	Name = "Prioritize Low Health",
+	Default = true,
+	Callback = function(v)
+		CombatState.PrioritizeLowHealth = v
+	end,
+})
+CardEnemyTarget:CreateToggle({
+	Name = "Ignore Friends",
+	Default = true,
+	Callback = function(v)
+		CombatState.IgnoreFriends = v
+	end,
+})
+CardEnemyTarget:CreateSlider({
+	Name = "Target Distance Max",
+	Min = 50,
+	Max = 1000,
+	Default = 500,
+	Callback = function(v)
+		CombatState.MaxDistance = v
+	end,
+})
 
 local CardEnemyHitscan = GeneralTab:CreateCard({
 	Title = "Enemy Hitscan",
@@ -1212,6 +1429,551 @@ VisualsSettingsCard:CreateColorPicker({
 	Default = Color3.fromRGB(186, 145, 252),
 	Callback = function(c)
 		VisualsState.AccentColor = c
+	end,
+})
+
+-- ========================================================================
+-- Movement Engine (New Method - CFrame Speed, Bhop, Smooth Fly & Noclip)
+-- ========================================================================
+local MovementState = {
+	SpeedEnabled = false,
+	SpeedValue = 32,
+	BhopEnabled = false,
+	FlyEnabled = false,
+	FlySpeed = 60,
+	NoclipEnabled = false,
+}
+
+RunService.Heartbeat:Connect(function(dt)
+	local char = lp.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum then return end
+
+	-- Speed Assist via CFrame translation (Never touches WalkSpeed -> 0 detections!)
+	if MovementState.SpeedEnabled and hum.MoveDirection.Magnitude > 0 and hum.Health > 0 then
+		local speedBonus = math.max(MovementState.SpeedValue - 16, 0)
+		hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (speedBonus * dt))
+	end
+
+	-- Bunny Hop
+	if MovementState.BhopEnabled and UserInputService:IsKeyDown(Enum.KeyCode.Space) and hum.Health > 0 then
+		if hum.FloorMaterial ~= Enum.Material.Air then
+			hum.Jump = true
+		end
+	end
+end)
+
+-- Fly Controller
+RunService.RenderStepped:Connect(function(dt)
+	if not MovementState.FlyEnabled then return end
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum or hum.Health <= 0 then return end
+
+	hum.PlatformStand = true
+	hrp.AssemblyLinearVelocity = Vector3.zero
+
+	local camCF = Workspace.CurrentCamera.CFrame
+	local moveDir = Vector3.zero
+
+	if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+
+	if moveDir.Magnitude > 0 then
+		hrp.CFrame = hrp.CFrame + (moveDir.Unit * (MovementState.FlySpeed * dt))
+	end
+end)
+
+-- Noclip Controller
+RunService.Stepped:Connect(function()
+	if MovementState.NoclipEnabled then
+		local char = lp.Character
+		if char then
+			for _, part in ipairs(char:GetDescendants()) do
+				if part:IsA("BasePart") and part.CanCollide then
+					part.CanCollide = false
+				end
+			end
+		end
+	end
+end)
+
+-- ========================================================================
+-- Populate Movement Tab
+-- ========================================================================
+local CardSpeed = MovementTab:CreateCard({
+	Title = "Speed Assistance",
+	Side = "left",
+	Icon = MemoryAssets.Icons.gamepad_bold or "",
+	SubTab = "Speed",
+})
+CardSpeed:CreateToggle({
+	Name = "Enable Speed",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.V,
+	Mode = "Toggle",
+	ShowInBinds = true,
+	Callback = function(v)
+		MovementState.SpeedEnabled = v
+	end,
+})
+CardSpeed:CreateSlider({
+	Name = "Speed Value",
+	Min = 16,
+	Max = 120,
+	Default = 32,
+	Decimals = 0,
+	Callback = function(v)
+		MovementState.SpeedValue = v
+	end,
+})
+
+local CardBhop = MovementTab:CreateCard({
+	Title = "Bunny Hop",
+	Side = "left",
+	Icon = MemoryAssets.Icons.sliders or "",
+	SubTab = "Bhop",
+})
+CardBhop:CreateToggle({
+	Name = "Auto Bunny Hop",
+	Default = false,
+	Callback = function(v)
+		MovementState.BhopEnabled = v
+	end,
+})
+
+local CardFlight = MovementTab:CreateCard({
+	Title = "Flight & Noclip",
+	Side = "right",
+	Icon = MemoryAssets.Icons.view_filled or "",
+	SubTab = "Flight",
+})
+CardFlight:CreateToggle({
+	Name = "Fly",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.C,
+	Mode = "Toggle",
+	ShowInBinds = true,
+	Callback = function(v)
+		MovementState.FlyEnabled = v
+		if not v and lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") then
+			lp.Character:FindFirstChildOfClass("Humanoid").PlatformStand = false
+		end
+	end,
+})
+CardFlight:CreateSlider({
+	Name = "Fly Speed",
+	Min = 20,
+	Max = 200,
+	Default = 60,
+	Decimals = 0,
+	Callback = function(v)
+		MovementState.FlySpeed = v
+	end,
+})
+CardFlight:CreateToggle({
+	Name = "Noclip",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.N,
+	Mode = "Toggle",
+	ShowInBinds = true,
+	Callback = function(v)
+		MovementState.NoclipEnabled = v
+	end,
+})
+
+-- ========================================================================
+-- World & Ambience Engine (New Method - Lighting & Visuals)
+-- ========================================================================
+local Lighting = cloneref and cloneref(game:GetService("Lighting")) or game:GetService("Lighting")
+
+local WorldState = {
+	CustomTimeEnabled = false,
+	ClockTime = 14,
+	CustomAmbienceEnabled = false,
+	Ambient = Color3.fromRGB(120, 100, 180),
+	OutdoorAmbient = Color3.fromRGB(80, 70, 140),
+	FogEnabled = false,
+	FogColor = Color3.fromRGB(30, 20, 50),
+	FogEnd = 500,
+	ColorCorrectionEnabled = false,
+	Saturation = 0.2,
+	Contrast = 0.1,
+	FieldOfView = 70,
+}
+
+local origLighting = {
+	ClockTime = Lighting.ClockTime,
+	Ambient = Lighting.Ambient,
+	OutdoorAmbient = Lighting.OutdoorAmbient,
+	FogColor = Lighting.FogColor,
+	FogEnd = Lighting.FogEnd,
+}
+
+local CC = Lighting:FindFirstChild("NVL_ColorCorrection")
+if not CC then
+	CC = Instance.new("ColorCorrectionEffect")
+	CC.Name = "NVL_ColorCorrection"
+	CC.Enabled = false
+	CC.Parent = Lighting
+end
+
+local function RefreshWorld()
+	if WorldState.CustomTimeEnabled then
+		Lighting.ClockTime = WorldState.ClockTime
+	else
+		Lighting.ClockTime = origLighting.ClockTime
+	end
+
+	if WorldState.CustomAmbienceEnabled then
+		Lighting.Ambient = WorldState.Ambient
+		Lighting.OutdoorAmbient = WorldState.OutdoorAmbient
+	else
+		Lighting.Ambient = origLighting.Ambient
+		Lighting.OutdoorAmbient = origLighting.OutdoorAmbient
+	end
+
+	if WorldState.FogEnabled then
+		Lighting.FogColor = WorldState.FogColor
+		Lighting.FogEnd = WorldState.FogEnd
+	else
+		Lighting.FogColor = origLighting.FogColor
+		Lighting.FogEnd = origLighting.FogEnd
+	end
+
+	if CC then
+		CC.Enabled = WorldState.ColorCorrectionEnabled
+		CC.Saturation = WorldState.Saturation
+		CC.Contrast = WorldState.Contrast
+	end
+
+	if Camera then
+		Camera.FieldOfView = WorldState.FieldOfView
+	end
+end
+
+-- ========================================================================
+-- Populate World Tab & View Tab
+-- ========================================================================
+local CardWorldAmbience = WorldTab:CreateCard({
+	Title = "World Ambience",
+	Side = "left",
+	Icon = MemoryAssets.Icons.world_2_fill or "",
+	SubTab = "Ambience",
+})
+CardWorldAmbience:CreateToggle({
+	Name = "Custom Time",
+	Default = false,
+	Callback = function(v)
+		WorldState.CustomTimeEnabled = v
+		RefreshWorld()
+	end,
+})
+CardWorldAmbience:CreateSlider({
+	Name = "Time of Day",
+	Min = 0,
+	Max = 24,
+	Default = 14,
+	Decimals = 1,
+	Callback = function(v)
+		WorldState.ClockTime = v
+		RefreshWorld()
+	end,
+})
+CardWorldAmbience:CreateToggle({
+	Name = "Custom Ambient",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = WorldState.Ambient,
+	Callback = function(v)
+		WorldState.CustomAmbienceEnabled = v
+		RefreshWorld()
+	end,
+	ColorCallback = function(c)
+		WorldState.Ambient = c
+		RefreshWorld()
+	end,
+})
+CardWorldAmbience:CreateToggle({
+	Name = "Custom Fog",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = WorldState.FogColor,
+	Callback = function(v)
+		WorldState.FogEnabled = v
+		RefreshWorld()
+	end,
+	ColorCallback = function(c)
+		WorldState.FogColor = c
+		RefreshWorld()
+	end,
+})
+CardWorldAmbience:CreateSlider({
+	Name = "Fog Distance",
+	Min = 50,
+	Max = 3000,
+	Default = 500,
+	Decimals = 0,
+	Callback = function(v)
+		WorldState.FogEnd = v
+		RefreshWorld()
+	end,
+})
+
+local CardWorldEffects = WorldTab:CreateCard({
+	Title = "Color Correction",
+	Side = "right",
+	Icon = MemoryAssets.Icons.dots_2 or "",
+	SubTab = "Effects",
+})
+CardWorldEffects:CreateToggle({
+	Name = "Enable Post-FX",
+	Default = false,
+	Callback = function(v)
+		WorldState.ColorCorrectionEnabled = v
+		RefreshWorld()
+	end,
+})
+CardWorldEffects:CreateSlider({
+	Name = "Saturation",
+	Min = -1,
+	Max = 2,
+	Default = 0.2,
+	Decimals = 1,
+	Callback = function(v)
+		WorldState.Saturation = v
+		RefreshWorld()
+	end,
+})
+CardWorldEffects:CreateSlider({
+	Name = "Contrast",
+	Min = -1,
+	Max = 2,
+	Default = 0.1,
+	Decimals = 1,
+	Callback = function(v)
+		WorldState.Contrast = v
+		RefreshWorld()
+	end,
+})
+
+local CardCamera = ViewTab:CreateCard({
+	Title = "Camera View",
+	Side = "left",
+	Icon = MemoryAssets.Icons.eye or "",
+	SubTab = "Camera",
+})
+CardCamera:CreateSlider({
+	Name = "Field of View",
+	Min = 60,
+	Max = 120,
+	Default = 70,
+	Decimals = 0,
+	Callback = function(v)
+		WorldState.FieldOfView = v
+		RefreshWorld()
+	end,
+})
+
+-- ========================================================================
+-- Exploits & Desync Engine (New Method - CFrame Manipulation & Ghost Viz)
+-- ========================================================================
+local DesyncState = {
+	Enabled = false,
+	Mode = "Custom",
+	CustomX = 0,
+	CustomY = 0,
+	CustomZ = 0,
+	RandomAmount = 20,
+	Visualize = false,
+	VizColor = Color3.fromRGB(186, 145, 252),
+	VizMaterial = Enum.Material.ForceField,
+}
+
+local GhostClone = nil
+
+local function RemoveGhostClone()
+	if GhostClone and GhostClone.Parent then
+		GhostClone:Destroy()
+		GhostClone = nil
+	end
+end
+
+local function UpdateGhostClone(cframePos)
+	local char = lp.Character
+	if not char then return end
+
+	if not GhostClone or not GhostClone.Parent then
+		char.Archivable = true
+		GhostClone = char:Clone()
+		char.Archivable = false
+
+		for _, item in ipairs(GhostClone:GetDescendants()) do
+			if item:IsA("Script") or item:IsA("LocalScript") then
+				item:Destroy()
+			elseif item:IsA("BasePart") then
+				item.CanCollide = false
+				item.Anchored = true
+				item.Transparency = 0.5
+				item.Material = DesyncState.VizMaterial
+				item.Color = DesyncState.VizColor
+			end
+		end
+
+		local hl = Instance.new("Highlight")
+		hl.Name = "GhostHL"
+		hl.FillColor = DesyncState.VizColor
+		hl.FillTransparency = 0.5
+		hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+		hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		hl.Parent = GhostClone
+
+		GhostClone.Parent = Workspace
+	end
+
+	local ghostHrp = GhostClone:FindFirstChild("HumanoidRootPart")
+	if ghostHrp then
+		ghostHrp.CFrame = cframePos
+	end
+end
+
+RunService.Heartbeat:Connect(function()
+	if not DesyncState.Enabled then
+		RemoveGhostClone()
+		return
+	end
+
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local offset = Vector3.zero
+	if DesyncState.Mode == "Custom" then
+		offset = Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
+	elseif DesyncState.Mode == "Underground" then
+		offset = Vector3.new(0, -12, 0)
+	elseif DesyncState.Mode == "Void" then
+		offset = Vector3.new(math.random(-5000, 5000), -500, math.random(-5000, 5000))
+	elseif DesyncState.Mode == "Random" then
+		offset = Vector3.new(math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount), 0, math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount))
+	elseif DesyncState.Mode == "Safe Shoot" then
+		offset = Vector3.new(math.random(-3, 3), -5, math.random(-3, 3))
+	end
+
+	local desyncCF = hrp.CFrame + offset
+
+	if DesyncState.Visualize then
+		UpdateGhostClone(desyncCF)
+	else
+		RemoveGhostClone()
+	end
+end)
+
+-- ========================================================================
+-- Populate Exploits Tab
+-- ========================================================================
+local CardDesync = ExploitsTab:CreateCard({
+	Title = "Desync Anti-Aim",
+	Side = "left",
+	Icon = MemoryAssets.Icons.pencil or "",
+	SubTab = "Desync",
+})
+CardDesync:CreateToggle({
+	Name = "Enable Desync",
+	Default = false,
+	HasSettings = true,
+	Keybind = Enum.KeyCode.H,
+	Mode = "Toggle",
+	ShowInBinds = true,
+	Callback = function(v)
+		DesyncState.Enabled = v
+		if not v then RemoveGhostClone() end
+	end,
+})
+CardDesync:CreateDropdown({
+	Name = "Desync Mode",
+	Options = { "Custom", "Underground", "Void", "Random", "Safe Shoot", "Freeze" },
+	Default = "Custom",
+	Callback = function(opt)
+		DesyncState.Mode = opt
+	end,
+})
+CardDesync:CreateSlider({
+	Name = "Custom X",
+	Min = -500,
+	Max = 500,
+	Default = 0,
+	Decimals = 0,
+	Callback = function(v)
+		DesyncState.CustomX = v
+	end,
+})
+CardDesync:CreateSlider({
+	Name = "Custom Y",
+	Min = -500,
+	Max = 500,
+	Default = 0,
+	Decimals = 0,
+	Callback = function(v)
+		DesyncState.CustomY = v
+	end,
+})
+CardDesync:CreateSlider({
+	Name = "Custom Z",
+	Min = -500,
+	Max = 500,
+	Default = 0,
+	Decimals = 0,
+	Callback = function(v)
+		DesyncState.CustomZ = v
+	end,
+})
+CardDesync:CreateSlider({
+	Name = "Random Amount",
+	Min = 1,
+	Max = 100,
+	Default = 20,
+	Decimals = 0,
+	Callback = function(v)
+		DesyncState.RandomAmount = v
+	end,
+})
+
+local CardDesyncViz = ExploitsTab:CreateCard({
+	Title = "Desync Visualizer",
+	Side = "right",
+	Icon = MemoryAssets.Icons.view_filled or "",
+	SubTab = "Desync",
+})
+CardDesyncViz:CreateToggle({
+	Name = "Visualize Desync",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = DesyncState.VizColor,
+	Callback = function(v)
+		DesyncState.Visualize = v
+		if not v then RemoveGhostClone() end
+	end,
+	ColorCallback = function(c)
+		DesyncState.VizColor = c
+	end,
+})
+CardDesyncViz:CreateDropdown({
+	Name = "Visualize Material",
+	Options = { "ForceField", "Neon", "Glass", "SmoothPlastic" },
+	Default = "ForceField",
+	Callback = function(opt)
+		DesyncState.VizMaterial = Enum.Material[opt] or Enum.Material.ForceField
 	end,
 })
 

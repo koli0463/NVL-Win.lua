@@ -53,7 +53,6 @@ $body = @{
     params = @{
         name = "execute_script"
         arguments = @{
-            pid = "13980"
             source = $bootstrap
         }
     }
