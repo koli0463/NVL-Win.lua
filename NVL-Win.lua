@@ -3,10 +3,67 @@
     NVL-Win.lua - Main Execution Script for Neverlose / Memory UI
     Pixel-Perfect Luau Interface matching NVL_PRIVATE with Crown Logo,
     Dynamic Place/Game SubTitle, Live NEVERLOSE Watermark, Discord Sync,
-    Spectators Window with Real Avatars, Gear Settings (No 'X' button),
+    Spectators Window with Real-time Player Tracking, Harion Secure Protection,
     and Complete Tabs + TopBar Sub-Tabs (Thread, Enemy, Other, Team).
     ========================================================================
 ]]
+
+-- ========================================================================
+-- Environment Protection & Anti-Detection Layer (Extracted from Harion)
+-- ========================================================================
+do
+	local cloneref = cloneref or function(o) return o end
+	local safeNewcclosure = newcclosure or function(fn) return fn end
+
+	if not getgenv().__NVL_Protected then
+		getgenv().__NVL_Protected = true
+
+		if setthreadidentity then
+			pcall(setthreadidentity, 8)
+		end
+
+		-- Hook LocalPlayer.Kick to prevent game scripts from client-kicking when UI is injected
+		pcall(function()
+			local Players = cloneref(game:GetService("Players"))
+			local lp = Players.LocalPlayer
+			if lp and hookfunction then
+				local oldKick
+				oldKick = hookfunction(lp.Kick, safeNewcclosure(function(self, ...)
+					if self == lp then
+						warn("[NVL-Win] Security Guard: Game client-kick attempt blocked.")
+						return nil
+					end
+					return oldKick(self, ...)
+				end))
+			end
+		end)
+
+		-- CameraSecurity & Analytics metatable tamper bypass (from Harion.txt)
+		pcall(function()
+			local okEnv, renv = pcall(getrenv)
+			local setmt = okEnv and renv and renv.setmetatable
+			if hookfunction and setmt then
+				local oldSetmt = setmt
+				hookfunction(setmt, safeNewcclosure(function(t, mt)
+					if mt and type(mt) == "table" and rawget(mt, "__mode") then
+						local mode = rawget(mt, "__mode")
+						if mode == "kv" or mode == "v" or mode == "k" then
+							local okTrace, trace = pcall(debug.traceback)
+							if okTrace and type(trace) == "string" then
+								if trace:find("MiscellaneousController", 1, true)
+									or trace:find("CameraSecurity", 1, true)
+									or trace:find("AnalyticsPipelineController", 1, true) then
+									return oldSetmt({ 1, 2, 3 }, {})
+								end
+							end
+						end
+					end
+					return oldSetmt(t, mt)
+				end))
+			end
+		end)
+	end
+end
 
 -- Load Asset Bundle
 local MemoryAssets = nil
@@ -54,32 +111,10 @@ local Watermark = Window:CreateWatermark({
 	Visible = true,
 })
 
-local initialSpectators = {
-	{ Name = "Raxxys", DisplayName = "Raxxys", UserId = 10542009861, Mode = "Watching" },
-	{ Name = "Sammill", DisplayName = "Sammill", UserId = 1138506088, Mode = "Watching" },
-	{ Name = "Johhnyy", DisplayName = "Johhnyy", UserId = 1284562089, Mode = "Watching" },
-	{ Name = "killstroy", DisplayName = "killstroy", UserId = 1849203847, Mode = "Watching" },
-	{ Name = "Anton Var", DisplayName = "Anton Var", UserId = 1981141314, Mode = "Watching" },
-	{ Name = "Layla1970", DisplayName = "Layla1970", UserId = 2039485721, Mode = "Watching" },
-}
-
--- Append real server players so clicking 'Watching' can spectate live targets in the game
-for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
-	if p ~= game:GetService("Players").LocalPlayer then
-		table.insert(initialSpectators, {
-			Name = p.Name,
-			DisplayName = p.DisplayName,
-			UserId = p.UserId,
-			Mode = "Watching",
-		})
-	end
-end
-
 local Spectators = Window:CreateSpectators({
 	Title = "Spectators",
-	Players = initialSpectators,
 	Visible = true,
-	AutoTrack = false,
+	AutoTrack = true,
 })
 
 -- ========================================================================
@@ -486,8 +521,10 @@ CardTeamSettings:CreateToggle({ Name = "Share Target Over Network", Default = fa
 CardTeamSettings:CreateToggle({ Name = "Draw Teammate Tracers", Default = true })
 
 -- ========================================================================
--- Populate Players Tab (Visuals)
+-- Populate Players Tab (Visuals & ESP)
 -- ========================================================================
+
+-- Left Column: Card 1 - ESP Main
 local VisualsMainCard = PlayersTab:CreateCard({
 	Title = "ESP Main",
 	Side = "left",
@@ -499,41 +536,175 @@ VisualsMainCard:CreateToggle({
 	ColorBadge = true,
 	ColorValue = Color3.fromRGB(186, 145, 252),
 	Callback = function(v) print("[NVL-Win] Boxes:", v) end,
+	ColorCallback = function(c) print("[NVL-Win] Box Color:", c) end,
 })
 VisualsMainCard:CreateToggle({
+	Name = "Filled Box",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(186, 145, 252),
+	Callback = function(v) print("[NVL-Win] Filled Box:", v) end,
+})
+VisualsMainCard:CreateToggle({
+	Name = "Box Outline",
+	Default = true,
+	Callback = function(v) print("[NVL-Win] Box Outline:", v) end,
+})
+VisualsMainCard:CreateToggle({
+	Name = "Corner Box",
+	Default = false,
+	Callback = function(v) print("[NVL-Win] Corner Box:", v) end,
+})
+
+-- Left Column: Card 2 - Player Info
+local PlayerInfoCard = PlayersTab:CreateCard({
+	Title = "Player Info",
+	Side = "left",
+	Icon = MemoryAssets.Icons.user_filled or "",
+})
+PlayerInfoCard:CreateToggle({
 	Name = "Name Tags",
 	Default = true,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(240, 240, 245),
 	Callback = function(v) print("[NVL-Win] Name Tags:", v) end,
+	ColorCallback = function(c) print("[NVL-Win] Name Color:", c) end,
 })
-VisualsMainCard:CreateToggle({
+PlayerInfoCard:CreateToggle({
 	Name = "Health Bar",
 	Default = true,
 	Callback = function(v) print("[NVL-Win] Health Bar:", v) end,
 })
-VisualsMainCard:CreateToggle({
+PlayerInfoCard:CreateToggle({
+	Name = "Health Text",
+	Default = true,
+	Callback = function(v) print("[NVL-Win] Health Text:", v) end,
+})
+PlayerInfoCard:CreateToggle({
 	Name = "Armor Bar",
 	Default = false,
 	Callback = function(v) print("[NVL-Win] Armor Bar:", v) end,
 })
+PlayerInfoCard:CreateToggle({
+	Name = "Distance",
+	Default = true,
+	Callback = function(v) print("[NVL-Win] Distance:", v) end,
+})
+PlayerInfoCard:CreateToggle({
+	Name = "Equipped Weapon",
+	Default = false,
+	Callback = function(v) print("[NVL-Win] Equipped Weapon:", v) end,
+})
 
-local VisualsEffectsCard = PlayersTab:CreateCard({
-	Title = "Chams & Effects",
+-- Left Column: Card 3 - Indicators & Skeleton
+local IndicatorsCard = PlayersTab:CreateCard({
+	Title = "Indicators",
+	Side = "left",
+	Icon = MemoryAssets.Icons.target_fill or "",
+})
+IndicatorsCard:CreateToggle({
+	Name = "Off-Screen Arrows",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(255, 120, 120),
+	Callback = function(v) print("[NVL-Win] Off-Screen Arrows:", v) end,
+})
+IndicatorsCard:CreateToggle({
+	Name = "Tracers",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(186, 145, 252),
+	Callback = function(v) print("[NVL-Win] Tracers:", v) end,
+})
+IndicatorsCard:CreateToggle({
+	Name = "Skeleton",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(220, 220, 230),
+	Callback = function(v) print("[NVL-Win] Skeleton:", v) end,
+})
+
+-- Right Column: Card 1 - Chams & Highlights
+local VisualsChamsCard = PlayersTab:CreateCard({
+	Title = "Chams & Highlights",
 	Side = "right",
 	Icon = MemoryAssets.Icons.view_filled or "",
 })
-VisualsEffectsCard:CreateToggle({
-	Name = "Chams Glow",
+VisualsChamsCard:CreateToggle({
+	Name = "Highlight Chams",
 	Default = true,
 	ColorBadge = true,
 	ColorValue = Color3.fromRGB(186, 145, 252),
-	Callback = function(v) print("[NVL-Win] Chams:", v) end,
+	Callback = function(v) print("[NVL-Win] Highlight Chams:", v) end,
+	ColorCallback = function(c) print("[NVL-Win] Chams Color:", c) end,
+})
+VisualsChamsCard:CreateToggle({
+	Name = "Chams Outline",
+	Default = true,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(255, 255, 255),
+	Callback = function(v) print("[NVL-Win] Chams Outline:", v) end,
+})
+VisualsChamsCard:CreateToggle({
+	Name = "Through Walls",
+	Default = true,
+	Callback = function(v) print("[NVL-Win] Through Walls:", v) end,
+})
+VisualsChamsCard:CreateToggle({
+	Name = "Rainbow Mode",
+	Default = false,
+	Callback = function(v) print("[NVL-Win] Rainbow Mode:", v) end,
+})
+
+-- Right Column: Card 2 - Visual Effects
+local VisualsEffectsCard = PlayersTab:CreateCard({
+	Title = "Visual Effects",
+	Side = "right",
+	Icon = MemoryAssets.Icons.dots_2 or "",
 })
 VisualsEffectsCard:CreateToggle({
 	Name = "Hit FX",
 	Default = true,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(255, 80, 80),
 	Callback = function(v) print("[NVL-Win] Hit FX:", v) end,
 })
-VisualsEffectsCard:CreateColorPicker({
+VisualsEffectsCard:CreateToggle({
+	Name = "Bullet Tracers",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = Color3.fromRGB(140, 180, 255),
+	Callback = function(v) print("[NVL-Win] Bullet Tracers:", v) end,
+})
+VisualsEffectsCard:CreateToggle({
+	Name = "Damage Numbers",
+	Default = true,
+	Callback = function(v) print("[NVL-Win] Damage Numbers:", v) end,
+})
+
+-- Right Column: Card 3 - Visual Settings
+local VisualsSettingsCard = PlayersTab:CreateCard({
+	Title = "Visual Settings",
+	Side = "right",
+	Icon = MemoryAssets.Icons.settings_bold or "",
+})
+VisualsSettingsCard:CreateSlider({
+	Name = "Render Distance",
+	Min = 100,
+	Max = 3000,
+	Default = 1500,
+	Decimals = 0,
+	Callback = function(v) print("[NVL-Win] Render Distance:", v) end,
+})
+VisualsSettingsCard:CreateSlider({
+	Name = "ESP Font Size",
+	Min = 8,
+	Max = 16,
+	Default = 11,
+	Decimals = 0,
+	Callback = function(v) print("[NVL-Win] ESP Font Size:", v) end,
+})
+VisualsSettingsCard:CreateColorPicker({
 	Name = "Accent Color",
 	Default = Color3.fromRGB(186, 145, 252),
 	Callback = function(c)

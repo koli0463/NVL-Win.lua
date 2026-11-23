@@ -155,7 +155,7 @@ function MemoryUI:Notify(config)
 	config = config or {}
 	local title = config.Title or "Notification"
 	local content = config.Content or ""
-	local duration = config.Duration or 3.5
+	local duration = config.Duration or 3.2
 
 	if not self.ScreenGui then return end
 
@@ -163,80 +163,128 @@ function MemoryUI:Notify(config)
 		self.NotificationsHolder = Create("Frame", {
 			Name = "NotificationContainer",
 			Parent = self.ScreenGui,
-			Size = UDim2.new(0, 320, 1, -40),
-			Position = UDim2.new(1, -335, 0, 20),
+			Size = UDim2.new(0, 310, 1, -40),
+			Position = UDim2.new(1, -325, 0, 20),
 			BackgroundTransparency = 1,
-			ZIndex = 100,
+			ZIndex = 200,
 		})
 		Create("UIListLayout", {
 			Parent = self.NotificationsHolder,
 			SortOrder = Enum.SortOrder.LayoutOrder,
 			VerticalAlignment = Enum.VerticalAlignment.Bottom,
-			Padding = UDim.new(0, 10),
+			Padding = UDim.new(0, 8),
 		})
 	end
 
+	local ToastWrapper = Create("Frame", {
+		Name = "ToastWrapper",
+		Parent = self.NotificationsHolder,
+		Size = UDim2.new(1, 0, 0, 62),
+		BackgroundTransparency = 1,
+		ClipsDescendants = false,
+		ZIndex = 201,
+	})
+
 	local Toast = Create("Frame", {
 		Name = "Toast",
-		Parent = self.NotificationsHolder,
-		Size = UDim2.new(1, 0, 0, 64),
+		Parent = ToastWrapper,
+		Size = UDim2.new(1, 0, 1, 0),
+		Position = UDim2.new(1, 60, 0, 0),
 		BackgroundColor3 = Color3.fromRGB(15, 15, 18),
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		Position = UDim2.new(1, 40, 0, 0),
-		ZIndex = 101,
+		ClipsDescendants = true,
+		ZIndex = 202,
 	})
 	Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = Toast })
-	Create("UIStroke", { Parent = Toast, Color = Theme.BorderPurple, Thickness = 1 })
+	local ToastStroke = Create("UIStroke", { Parent = Toast, Color = Theme.Accent, Thickness = 1.2, Transparency = 1 })
 
 	local LeftAccent = Create("Frame", {
 		Parent = Toast,
-		Size = UDim2.new(0, 3, 1, -16),
+		Size = UDim2.new(0, 3.5, 1, -16),
 		Position = UDim2.new(0, 0, 0.5, -8),
 		BackgroundColor3 = Theme.Accent,
 		BorderSizePixel = 0,
-		ZIndex = 102,
+		ZIndex = 203,
 	})
 	Create("UICorner", { CornerRadius = UDim.new(0, 2), Parent = LeftAccent })
 
-	Create("TextLabel", {
+	local TitleLabel = Create("TextLabel", {
 		Parent = Toast,
 		Size = UDim2.new(1, -30, 0, 18),
-		Position = UDim2.new(0, 16, 0, 10),
+		Position = UDim2.new(0, 14, 0, 9),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
 		Text = title,
 		TextColor3 = Theme.TextBright,
-		TextSize = 13,
+		TextTransparency = 1,
+		TextSize = 12.5,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		ZIndex = 102,
+		ZIndex = 203,
 	})
 
-	Create("TextLabel", {
+	local ContentLabel = Create("TextLabel", {
 		Parent = Toast,
-		Size = UDim2.new(1, -30, 0, 24),
-		Position = UDim2.new(0, 16, 0, 30),
+		Size = UDim2.new(1, -26, 0, 24),
+		Position = UDim2.new(0, 14, 0, 28),
 		BackgroundTransparency = 1,
-		Font = Enum.Font.Gotham,
+		Font = Enum.Font.GothamMedium,
 		Text = content,
 		TextColor3 = Theme.TextMuted,
+		TextTransparency = 1,
 		TextSize = 11,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		ZIndex = 102,
+		ZIndex = 203,
 	})
 
-	Toast.Position = UDim2.new(1, 100, 0, 0)
-	Tween(Toast, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Position = UDim2.new(0, 0, 0, 0)
+	-- Progress Bar Timer line
+	local ProgressBar = Create("Frame", {
+		Name = "ProgressBar",
+		Parent = Toast,
+		Size = UDim2.new(1, 0, 0, 2),
+		Position = UDim2.new(0, 0, 1, -2),
+		BackgroundColor3 = Theme.Accent,
+		BorderSizePixel = 0,
+		ZIndex = 204,
 	})
 
+	-- Entrance Animations
+	Tween(Toast, TweenInfo.new(0.38, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0, 0, 0, 0),
+		BackgroundTransparency = 0.05,
+	})
+	Tween(ToastStroke, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 0,
+		Color = Theme.BorderPurple,
+	})
+	Tween(TitleLabel, TweenInfo.new(0.3), { TextTransparency = 0 })
+	Tween(ContentLabel, TweenInfo.new(0.3), { TextTransparency = 0 })
+
+	-- Progress bar shrinks linearly
+	Tween(ProgressBar, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+		Size = UDim2.new(0, 0, 0, 2),
+	})
+
+	-- Dismissal Animation
 	task.delay(duration, function()
-		if Toast and Toast.Parent then
-			local outTween = Tween(Toast, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-				Position = UDim2.new(1, 80, 0, 0)
+		if ToastWrapper and ToastWrapper.Parent then
+			Tween(Toast, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				Position = UDim2.new(1, 70, 0, 0),
+				BackgroundTransparency = 1,
 			})
-			outTween.Completed:Connect(function()
-				pcall(function() Toast:Destroy() end)
+			Tween(ToastStroke, TweenInfo.new(0.25), { Transparency = 1 })
+			Tween(TitleLabel, TweenInfo.new(0.2), { TextTransparency = 1 })
+			Tween(ContentLabel, TweenInfo.new(0.2), { TextTransparency = 1 })
+			task.delay(0.22, function()
+				if ToastWrapper and ToastWrapper.Parent then
+					local shrinkTween = Tween(ToastWrapper, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+						Size = UDim2.new(1, 0, 0, 0),
+					})
+					shrinkTween.Completed:Connect(function()
+						pcall(function() ToastWrapper:Destroy() end)
+					end)
+				end
 			end)
 		end
 	end)
@@ -464,7 +512,24 @@ end
 function MemoryUI:CreateSpectators(config)
 	config = config or {}
 	local title = config.Title or "Spectators"
-	local initialPlayers = config.Players or { "Raxxys", "Sammill", "Johhnyy", "killstroy", "Anton Var", "Layla1970" }
+
+	-- Fetch currently connected real players in the server (excluding LocalPlayer)
+	local function GetRealPlayers()
+		local list = {}
+		for _, pl in ipairs(Players:GetPlayers()) do
+			if pl ~= LocalPlayer then
+				table.insert(list, {
+					Name = pl.Name,
+					DisplayName = pl.DisplayName,
+					UserId = pl.UserId,
+					Mode = "Watching",
+				})
+			end
+		end
+		return list
+	end
+
+	local initialPlayers = config.Players or GetRealPlayers()
 	local visible = (config.Visible ~= false)
 	local autoTrack = (config.AutoTrack ~= false)
 
@@ -932,37 +997,33 @@ function MemoryUI:CreateSpectators(config)
 
 	Populate(initialPlayers)
 
-	-- Optional Auto-Tracking of Real Players Spectating
+	-- Event-driven Live Player Tracking (Instant removal on leave, zero polling, zero FPS impact!)
 	if autoTrack then
-		task.spawn(function()
-			while WindowFrame and WindowFrame.Parent do
-				task.wait(2)
-				local realSpectators = {}
-				local myCam = workspace.CurrentCamera
-				for _, pl in ipairs(Players:GetPlayers()) do
-					if pl ~= LocalPlayer then
-						local isSpec = false
-						-- Check Da Hood / General spectate indicators
-						if pl.Character == nil or (pl.Character:FindFirstChild("Humanoid") and pl.Character.Humanoid.Health <= 0) then
-							isSpec = true
-						end
-						if isSpec then
-							table.insert(realSpectators, {
-								Name = pl.Name,
-								DisplayName = pl.DisplayName,
-								UserId = pl.UserId,
-								Mode = "Watching",
-							})
-						end
-					end
-				end
-				if #realSpectators > 0 then
-					Populate(realSpectators)
-				elseif #initialPlayers == 0 then
-					Populate({})
-				end
+		local addConn = Players.PlayerAdded:Connect(function(newPl)
+			if newPl ~= LocalPlayer then
+				table.insert(currentList, {
+					Name = newPl.Name,
+					DisplayName = newPl.DisplayName,
+					UserId = newPl.UserId,
+					Mode = "Watching",
+				})
+				Populate(currentList)
 			end
 		end)
+
+		local removeConn = Players.PlayerRemoving:Connect(function(leavingPl)
+			for idx = #currentList, 1, -1 do
+				local it = currentList[idx]
+				local pName = (type(it) == "table" and it.Name) or tostring(it)
+				if pName:lower() == leavingPl.Name:lower() then
+					table.remove(currentList, idx)
+				end
+			end
+			Populate(currentList)
+		end)
+
+		table.insert(self.Connections, addConn)
+		table.insert(self.Connections, removeConn)
 	end
 
 	-- Make Spectator Window Draggable
@@ -1865,7 +1926,7 @@ function MemoryUI:CreateWindow(config)
 		Size = UDim2.new(0, sidebarWidth - 85, 0, 12),
 		Position = UDim2.new(0, 48, 0.5, 2),
 		BackgroundTransparency = 1,
-		Font = Enum.Font.Gotham,
+		Font = Enum.Font.GothamMedium,
 		Text = "Lifetime",
 		TextColor3 = Color3.fromRGB(90, 90, 98),
 		TextSize = 10,
@@ -3175,8 +3236,11 @@ function MemoryUI:CreateWindow(config)
 					local clickBg = isDanger and Color3.fromRGB(200, 40, 50) or Theme.Accent
 					local clickText = isDanger and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(15, 15, 18)
 					Tween(Box, TweenInfo.new(0.08), { BackgroundColor3 = clickBg, TextColor3 = clickText })
-					task.wait(0.1)
-					Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = hoverBg, TextColor3 = hoverTextCol })
+					task.delay(0.1, function()
+						if Box and Box.Parent then
+							Tween(Box, TweenInfo.new(0.15), { BackgroundColor3 = hoverBg, TextColor3 = hoverTextCol })
+						end
+					end)
 					pcall(callback)
 				end)
 
