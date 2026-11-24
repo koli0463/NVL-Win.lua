@@ -33,14 +33,44 @@ local safeRequest = (syn and syn.request) or (http and http.request) or http_req
 -- Load local asset bundle
 local Assets = {}
 pcall(function()
-	if isfile and isfile("memory_assets.lua") then
-		Assets = loadstring(readfile("memory_assets.lua"))()
-	elseif isfile and isfile("uisimbl/memory_assets.lua") then
+	if isfile and isfile("uisimbl/memory_assets.lua") then
 		Assets = loadstring(readfile("uisimbl/memory_assets.lua"))()
+	elseif isfile and isfile("memory_assets.lua") then
+		Assets = loadstring(readfile("memory_assets.lua"))()
 	end
 end)
 Assets = Assets or {}
 Assets.Icons = Assets.Icons or {}
+
+-- Guarantee reset and human marker icons are loaded (offline custom asset PNG, 0 font dependency)
+pcall(function()
+	local decode = (crypt and (crypt.base64_decode or crypt.base64decode)) or (base64_decode or base64decode)
+	if isfolder and not isfolder('uisimbl') then makefolder('uisimbl') end
+	if isfolder and not isfolder('uisimbl/assets') then makefolder('uisimbl/assets') end
+	if isfolder and not isfolder('uisimbl/assets/icons') then makefolder('uisimbl/assets/icons') end
+
+	local pReset = 'uisimbl/assets/icons/reset.png'
+	local b64Reset = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAFDUlEQVR4nO1az6tVVRT+9rnPn0FlSg6URhUWBCGvRDSUQqtJOBIaWhSJBDVxqjMnwgPDiQjSKBT/ABXFQRPTEiyCzIcETYpSU0Oq++OLdV2Lu952n3ffve+e6z33ng8O5559197nfGut/WOtvYEKFSqMEkhmmFRwwsnX9P7axCmC5BK97yd5yitk7EFySu97+BD7ffmkkP+IHbwz9h5AMji3N/JNkg9IbtDybNwI18Ties8i8nW93yb5pNXBuBBH+r8ZZ3lTwFXxjGGSnyqiUSVQCyE0ADRVCRsBbAHwBoDnAEyLKACRNcKzIYS6yjdRRgWQFOLy8Q2SawHsBbAbwEuRqMiYd4giBD/pvZweQHJKrE7yKQCfA/gEwFr7W0mbxX3XMMK/oMR9PdPfb5O87qY1cWnpBvOhqdfm0k2BnEv+QES8lSDbynm+T/JZaxMlJH9MiTRyLN7Qy0jbb5P9keTy0pCPAhgj/1/Cws2o7E5kfakjOF+qBRA7y9iDjnzK6oZzJHeRXENyhz57uS9K0//ZsfxbasW4v7eca18SwjntvEvymsp9VoogiNrvZaojORv145j8jPOUTJfBtiy2sUOWx3tJvmpyKIn1DyrJeo7bf7yA5fDou7uHkgnaj/9IDHBGfkblu67rtb2pUoz+7LjzgcQgZ27/rYv8Rp9UL1BrLSN5I+rrXgHbSune3eAGrel5XP9C2chnfchu1d+pcPUwSoasB1kLWbfrPbhysfifAC5pWQvjqAA+HNTWROVG9jqAv6SrhBBMWeOhAJIhhCBEJc5/MaprZK8o8dFeyETIepQXD2hncxO4jRIi66NOXv8uzci/WA+o5fw32kHMYhQQQrAB8B6AG1Hft9lAsryPZQawJXrRHhA0zX3L3mvlen+Z5BNutigEcduahZZRmhpxhqIXQt/Yu125WH2dKKGPdnuCI9oOrSUFT3IlyadlpnLeWlgY/GYiB2BL4RNetghILBI9Hyb5K8lbJE+TfEbLB6sEaoOaCPlNYwGLByww+pfkCz5ZOqh3q9UlwrwiZwg0rXaUj+KyeEM/3aEXLzieSIaYF9gBh7z1wmLC8H0JwpaFbqkBBB/6ekVEhBtI/jNPVLhH5ZYOkPwrJO/pOyz7HKff63od8nWL8oIvE15gH/W3nPVRub53ex35VSS/T4w9pnS7zAPe8986UFD7FsnnnUW8F9gHyqC025NZiCLiHCLJjbpt7j3MKzzGMX1XcTEJO16wL2dPwFvpiG15aR0bzGrR1S5zcktJfqpKTpG35/MkT5K8aKl1U2RhCojc83SOEnwf/V3ziOvRBXJCRA9M/ZCjUE/+pu5Eo1/ioRfhxIvkkg84C0D6fD0RLfpzAPcBXNbEyXcA7uqCSuq8rocopJ31rm4Wfae1dwfAzhCCJGGXmKyuVocDdmaFVTr/miekdoDj/YP5kLfB6s8S2SD7eKNQzlXCmYSbxopoKBEj2UyUxTAZwc+O/GhEoHQjru4Y1aMPT43WC4EnLviK5Gp9T22UzwpsinZ/zX39qi3lHd5DvIwMiO+7d41u2o1zpzLbBk/1/2Z0pSCLnw9sRVnE+j6gAJiFNJEqzxIm79QjctM6c8yZvgA80OsagK8BnJPQ27Vhp88GioDivaEdo7uyFQAkcSJK8f14VjJOIYS73doYJAKGAPUIudjNil62SOKGgCHD9eF4IBOi7dTWsL+pQoUKFSpUqFABk4j/AVZTYHDzt73MAAAAAElFTkSuQmCC'
+	if decode and writefile then
+		if not isfile or not isfile(pReset) or (readfile and #readfile(pReset) < 1500) then
+			writefile(pReset, decode(b64Reset))
+		end
+	end
+	if getcustomasset and isfile and isfile(pReset) then
+		Assets.Icons['reset'] = getcustomasset(pReset)
+	end
+
+	local pHuman = 'uisimbl/assets/icons/human_marker.png'
+	local b64Human = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAD2klEQVR4nO1bvWtUQRD/zd7hBzHgF0FTpFJQiKVaWkgiWPgvCAEbq1hYm97CVrCysBCsLSwSxULFQhEtjHZqjIiNBoO5j5/sZdaMj3vJxbzNvXfrD5bL2+zOvpnZnZmd3Qf8R9qQfg5O8s/4IkKkAJJCsm6Z1/oaSYdBBsla5nkfyb22PttmYEDVLskRkjMkn5H8puUNyVskx7VNX5dmTObPkfzEfKyQnNZlMhgzgcoIyQnDaINki2RbS8vUeczYvpUFVzXpywGSi8psc50Z0NZZ4H/PVF4IXNP+jNH8RggCmvNLp9KegWsu72UP2rezwJdlkmNKJ5oQXEzmNbgZBuAZkR7H8+18v50Ajpi6KHCIj14ZL6rfpuBiEfbaV3++DOCrarXXcNf3awBY0OdoYbKLRTjQFxEvgIfKVLuHPqHNewDvdCn10q/UAdAxNYANNXDr4Zf+Xqy8G8y4wmnj5poZQYRgKDB/T11gtZnvMhOuZbTdMtFfwF3dJHWCKAwKqMyQPEvyAcklw7RfGq9ITmXbx4ZsxyCGmZqINLVuzPj5RQBvRcTPhmCYWfkkCTUS3EL/6EkSiUXYv3hwX2rMhjNj2kDHazq4uqD1FRH5maVVCQFQX5jkKIArAM4DOLxJMj8AzAK4KSI+eeKXTwsVsvinSC5w6/AG8KlXYX9/yjJL8rASib5sZliA6cJHaO8sQHV4JG8bpgvYgZ4PFfhFjoLXMGuzmt6N4ALasyK0FZdaZ0AcFxtS2Hv7VAg1G97ARxSA1uUkQ35gdEwVJl3gwTQCXYioHC6DtWKLwqn65A4HBKHQ+JwSBwOicNFosuq0HWRXFWseL1WWgHI6jmAp/cdwLzu79sFan3JZ43073ZZZ4DTlNedAmm3ldasiHzUvEA5U2XU3RrJXSQfmXR3N7RMijzv0DRsiz+QPBpjNxjzHOB05tLDVrbCV5XmP+cXt9UIcnVrPKlb2ex6DdP3BYA5LY9zNjoh9p9UmoXnBeuIADWIebS9ADwzl0XkaaeC3AHgM4D95v9/vac5bC2/ABQbGaohs559xng95qIZvTr6h7ZJm/ft9NchcTgkDofE4ZA4HBKHQ+JwSBwOicMhcTgkDheZfl4M323Dw0EUgHRhzMf9nZNkUxdOkrM3QKh11bkux7UbIuPmckPTfBXiMU9yyH5BRvK2SYKEbFHoP1X6yxE5QpgyN0UCXpM8GdqZWyUHSd7PtPU3R2/E/HBCEAnmotQIgHEznZ+ISMN8T5Dt54WzRx8XRCRkgqsH5kzZbtrMuxpb2XuCAcqUyyRC2KPQWNmr8v+BauA3EkVxLs2+xjkAAAAASUVORK5CYII='
+	if decode and writefile then
+		if not isfile or not isfile(pHuman) or (readfile and #readfile(pHuman) < 1000) then
+			writefile(pHuman, decode(b64Human))
+		end
+	end
+	if getcustomasset and isfile and isfile(pHuman) then
+		Assets.Icons['human_marker'] = getcustomasset(pHuman)
+	end
+end)
 
 -- Ensure logos are resolved
 local function GetLogoAsset(preferLeywin)
@@ -1103,6 +1133,16 @@ function MemoryUI:CreateSpectators(config)
 end
 
 -- ========================================================================
+-- Dropdown Management (Auto-close on tab switch, prevent bleed-through)
+-- ========================================================================
+function MemoryUI:CloseActiveDropdown()
+	if self.ActiveDropdown and typeof(self.ActiveDropdown.Close) == "function" then
+		pcall(self.ActiveDropdown.Close)
+		self.ActiveDropdown = nil
+	end
+end
+
+-- ========================================================================
 -- Sub-Settings Popout Modal (Toggled via Gear Button ⚙, NO 'X' button)
 -- ========================================================================
 function MemoryUI:OpenSubSettings(config)
@@ -1116,6 +1156,10 @@ function MemoryUI:OpenSubSettings(config)
 
 	-- Smooth Close Helper
 	local function CloseModal()
+		if self.ActiveSubSettingsBackdrop and self.ActiveSubSettingsBackdrop.Parent then
+			self.ActiveSubSettingsBackdrop:Destroy()
+			self.ActiveSubSettingsBackdrop = nil
+		end
 		if self.ActiveSubSettings and self.ActiveSubSettings.Parent and not self.ActiveSubSettingsClosing then
 			self.ActiveSubSettingsClosing = true
 			local targetModal = self.ActiveSubSettings
@@ -1150,6 +1194,23 @@ function MemoryUI:OpenSubSettings(config)
 	end
 
 	self.ActiveSubSettingsOwner = owner
+
+	-- Full-screen modal isolation backdrop (blocks click pass-through to background elements)
+	local Backdrop = Create("TextButton", {
+		Name = "SubSettingsBackdrop",
+		Parent = self.ScreenGui,
+		Size = UDim2.new(1, 0, 1, 0),
+		Position = UDim2.new(0, 0, 0, 0),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		Active = true,
+		ZIndex = 399,
+	})
+	Backdrop.MouseButton1Click:Connect(function()
+		CloseModal()
+	end)
+	self.ActiveSubSettingsBackdrop = Backdrop
 
 	local targetPos = config.Position or UDim2.new(0.5, -100, 0.5, -70)
 	local Modal = Create("Frame", {
@@ -2428,16 +2489,19 @@ function MemoryUI:CreateWindow(config)
 					})
 
 					pBtn.MouseButton1Click:Connect(function()
+						MemoryUI:CloseActiveDropdown()
 						Tab.CurrentSubTab = sName
 						RenderSubTabs()
 						FilterCardsBySubTab()
 					end)
 				end
 			end
+			MemoryUI:CloseActiveDropdown()
 			FilterCardsBySubTab()
 		end
 
 		local function SelectTab()
+			MemoryUI:CloseActiveDropdown()
 			if CurrentTab == Tab then return end
 			local oldTab = CurrentTab
 			CurrentTab = Tab
@@ -2960,18 +3024,15 @@ function MemoryUI:CreateWindow(config)
 					Tween(ValueBoxStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
 				end)
 
-				-- Reset Button (↺) to restore original default value
-				local ResetBtn = Create("TextButton", {
+				-- Reset Button (with local asset icon to completely eliminate tofu glyph box [])
+				local ResetBtn = Create("ImageButton", {
 					Name = "ResetBtn",
 					Parent = Row,
 					Size = UDim2.new(0, 22, 0, 22),
 					Position = UDim2.new(1, -30, 0.5, -11),
 					BackgroundColor3 = Color3.fromRGB(18, 20, 24),
 					BorderSizePixel = 0,
-					Font = Enum.Font.GothamBold,
-					Text = "↺",
-					TextColor3 = Color3.fromRGB(140, 145, 160),
-					TextSize = 13,
+					Image = "",
 					AutoButtonColor = false,
 					ZIndex = 6,
 				})
@@ -2981,17 +3042,40 @@ function MemoryUI:CreateWindow(config)
 					Color = Color3.fromRGB(30, 34, 42),
 					Thickness = 1,
 				})
+				local resetAsset = (Assets.Icons and Assets.Icons.reset) or ""
+				if (not resetAsset or resetAsset == "") and _G.MemoryAssets and _G.MemoryAssets.Icons and _G.MemoryAssets.Icons.reset then
+					resetAsset = _G.MemoryAssets.Icons.reset
+				end
+				if (not resetAsset or resetAsset == "") and getcustomasset and isfile then
+					if isfile("uisimbl/assets/icons/reset.png") then
+						resetAsset = getcustomasset("uisimbl/assets/icons/reset.png")
+					elseif isfile("reset.png") then
+						resetAsset = getcustomasset("reset.png")
+					end
+				end
+
+				local ResetIcon = Create("ImageLabel", {
+					Name = "Icon",
+					Parent = ResetBtn,
+					Size = UDim2.new(0, 14, 0, 14),
+					Position = UDim2.new(0.5, -7, 0.5, -7),
+					BackgroundTransparency = 1,
+					Image = resetAsset or "",
+					ImageColor3 = Color3.fromRGB(165, 170, 190),
+					ScaleType = Enum.ScaleType.Fit,
+					ZIndex = 7,
+				})
 
 				ResetBtn.MouseEnter:Connect(function()
 					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(26, 29, 38) })
 					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
-					Tween(ResetBtn, TweenInfo.new(0.18), { TextColor3 = Theme.TextWhite })
+					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Theme.TextWhite })
 				end)
 
 				ResetBtn.MouseLeave:Connect(function()
 					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(18, 20, 24) })
 					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Color3.fromRGB(30, 34, 42) })
-					Tween(ResetBtn, TweenInfo.new(0.18), { TextColor3 = Color3.fromRGB(140, 145, 160) })
+					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Color3.fromRGB(140, 145, 160) })
 				end)
 
 				-- Snow Particle Effect
@@ -3244,6 +3328,7 @@ function MemoryUI:CreateWindow(config)
 					Size = UDim2.new(0, Button.AbsoluteSize.X, 0, #options * 26 + 8),
 					BackgroundColor3 = Color3.fromRGB(15, 16, 19),
 					BorderSizePixel = 0,
+					Active = true,
 					Visible = false,
 					ZIndex = 150,
 				})
@@ -3256,6 +3341,56 @@ function MemoryUI:CreateWindow(config)
 					Padding = UDim.new(0, 2),
 				})
 				Create("UIPadding", { Parent = ListBox, PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) })
+
+				local DropdownBackdrop = nil
+				local function CloseDropdown()
+					if not isOpen then return end
+					isOpen = false
+					ListBox.Visible = false
+					if DropdownBackdrop and DropdownBackdrop.Parent then
+						DropdownBackdrop:Destroy()
+						DropdownBackdrop = nil
+					end
+					Tween(Chevron, TweenInfo.new(0.2), { Rotation = 0 })
+					Tween(Stroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(24, 26, 32) })
+					if MemoryUI.ActiveDropdown and MemoryUI.ActiveDropdown.Instance == ListBox then
+						MemoryUI.ActiveDropdown = nil
+					end
+				end
+
+				local function OpenDropdown()
+					MemoryUI:CloseActiveDropdown()
+					isOpen = true
+					ListBox.Size = UDim2.new(0, Button.AbsoluteSize.X, 0, #options * 26 + 8)
+					ListBox.Position = UDim2.new(0, Button.AbsolutePosition.X, 0, Button.AbsolutePosition.Y + Button.AbsoluteSize.Y + 4)
+					ListBox.Visible = true
+
+					-- Full-screen blocker to prevent click pass-through to background sliders/cards
+					if not DropdownBackdrop or not DropdownBackdrop.Parent then
+						DropdownBackdrop = Create("TextButton", {
+							Name = "DropdownBackdrop",
+							Parent = ScreenGui,
+							Size = UDim2.new(1, 0, 1, 0),
+							Position = UDim2.new(0, 0, 0, 0),
+							BackgroundTransparency = 1,
+							Text = "",
+							AutoButtonColor = false,
+							Active = true,
+							ZIndex = 149,
+						})
+						DropdownBackdrop.MouseButton1Click:Connect(function()
+							CloseDropdown()
+						end)
+					end
+
+					Tween(Chevron, TweenInfo.new(0.2), { Rotation = 180 })
+					Tween(Stroke, TweenInfo.new(0.2), { Color = Theme.Accent })
+
+					MemoryUI.ActiveDropdown = {
+						Instance = ListBox,
+						Close = CloseDropdown,
+					}
+				end
 
 				local function Populate()
 					for _, ch in ipairs(ListBox:GetChildren()) do
@@ -3280,10 +3415,7 @@ function MemoryUI:CreateWindow(config)
 						optBtn.MouseButton1Click:Connect(function()
 							selected = opt
 							SelectLabel.Text = tostring(selected)
-							isOpen = false
-							ListBox.Visible = false
-							Tween(Chevron, TweenInfo.new(0.2), { Rotation = 0 })
-							Tween(Stroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(24, 26, 32) })
+							CloseDropdown()
 							Populate()
 							pcall(callback, selected)
 						end)
@@ -3309,15 +3441,15 @@ function MemoryUI:CreateWindow(config)
 							return
 						end
 					end
-					isOpen = not isOpen
-					ListBox.Size = UDim2.new(0, Button.AbsoluteSize.X, 0, #options * 26 + 8)
-					ListBox.Position = UDim2.new(0, Button.AbsolutePosition.X, 0, Button.AbsolutePosition.Y + Button.AbsoluteSize.Y + 4)
-					ListBox.Visible = isOpen
-					Tween(Chevron, TweenInfo.new(0.2), { Rotation = isOpen and 180 or 0 })
-					Tween(Stroke, TweenInfo.new(0.2), { Color = isOpen and Theme.Accent or Color3.fromRGB(24, 26, 32) })
+					if isOpen then
+						CloseDropdown()
+					else
+						OpenDropdown()
+					end
 				end)
 
 				local dropObj = {
+					Close = CloseDropdown,
 					Set = function(v, extra)
 						local opt = (extra ~= nil and extra) or v
 						selected = opt

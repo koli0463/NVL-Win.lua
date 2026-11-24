@@ -1361,6 +1361,9 @@ local function CreateOrUpdatePlayerESP(player)
 	bbg.Size = UDim2.new(4.2, 0, 5.8, 0)
 	bbg.StudsOffset = Vector3.new(0, -0.1, 0)
 	bbg.AlwaysOnTop = VisualsState.ThroughWalls
+	bbg.LightInfluence = 0
+	bbg.ClipsDescendants = false
+	bbg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	bbg.MaxDistance = VisualsState.RenderDistance
 	bbg.Enabled = VisualsState.Enabled and (hum.Health > 0)
 	bbg.Parent = VisualsFolder
@@ -1417,9 +1420,10 @@ local function CreateOrUpdatePlayerESP(player)
 	local hpFrame = Instance.new("Frame")
 	hpFrame.Name = "HealthBar"
 	hpFrame.Size = UDim2.new(0, 4, 1, 0)
-	hpFrame.Position = UDim2.new(0, -9, 0, 0)
+	hpFrame.Position = UDim2.new(0, -7, 0, 0)
 	hpFrame.BackgroundColor3 = Color3.fromRGB(15, 16, 20)
 	hpFrame.BorderSizePixel = 0
+	hpFrame.ZIndex = 10
 	hpFrame.Visible = VisualsState.HealthBar
 	hpFrame.Parent = bbg
 
@@ -1438,21 +1442,24 @@ local function CreateOrUpdatePlayerESP(player)
 	hpFill.Position = UDim2.new(0, 0, 1 - pct, 0)
 	hpFill.BackgroundColor3 = GetHealthColor(pct)
 	hpFill.BorderSizePixel = 0
+	hpFill.ZIndex = 11
 	hpFill.Parent = hpFrame
 
 	local hpText = Instance.new("TextLabel")
 	hpText.Name = "HealthText"
-	hpText.Size = UDim2.new(0, 36, 0, 14)
-	hpText.Position = UDim2.new(0, -48, 1 - pct, -7)
+	hpText.Size = UDim2.new(0, 26, 0, 14)
+	hpText.AnchorPoint = Vector2.new(1, 0.5)
+	hpText.Position = UDim2.new(0, -9, 1 - pct, 0)
 	hpText.BackgroundTransparency = 1
 	hpText.Font = Enum.Font.GothamBold
-	hpText.TextSize = 10
-	hpText.TextColor3 = Color3.fromRGB(245, 245, 250)
-	hpText.TextStrokeTransparency = 0.3
+	hpText.TextSize = 11
+	hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+	hpText.TextStrokeTransparency = 0
 	hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	hpText.TextXAlignment = Enum.TextXAlignment.Right
 	hpText.Text = tostring(math.floor(curHealth))
-	hpText.Visible = VisualsState.HealthBar and VisualsState.HealthText
+	hpText.ZIndex = 12
+	hpText.Visible = VisualsState.HealthText
 	hpText.Parent = bbg
 
 	-- Distance Label (Meters under box)
@@ -1503,7 +1510,7 @@ local function CreateOrUpdatePlayerESP(player)
 		hpFill.BackgroundColor3 = GetHealthColor(newPct)
 
 		hpText.Text = tostring(math.floor(newCur))
-		hpText.Position = UDim2.new(0, -48, 1 - newPct, -7)
+		hpText.Position = UDim2.new(0, -9, 1 - newPct, 0)
 
 		if newCur <= 0 then
 			hl.Enabled = false
@@ -1625,7 +1632,7 @@ local function RefreshAllESP()
 				data.HealthBarFrame.Visible = VisualsState.HealthBar
 			end
 			if data.HealthText and data.HealthText.Parent then
-				data.HealthText.Visible = VisualsState.HealthBar and VisualsState.HealthText
+				data.HealthText.Visible = VisualsState.HealthText
 			end
 
 			-- Distance
@@ -1937,10 +1944,24 @@ NVL_Connect(RunService.Heartbeat, function()
 end)
 
 -- ========================================================================
--- Mod Skin & Morph Engine (Universal Client-Side Morph - 100% Offline/Online)
+-- Dynamic Character Morph & Avatar Studio Engine (100% Original Standalone Method)
 -- ========================================================================
 local get_obj = getobjects or (game and function(url) return game:GetObjects(url) end)
 local OriginalAvatarState = nil
+local CurrentTargetServerPlayer = ""
+local UniversalOutfitQuery = ""
+
+-- Dynamic Server Players Ingestion
+local function GetServerPlayerNames()
+	local names = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp then
+			table.insert(names, p.Name)
+		end
+	end
+	if #names == 0 then table.insert(names, "No other players") end
+	return names
+end
 
 local function SnapshotOriginalAvatar()
 	if OriginalAvatarState or not lp.Character then return end
@@ -1967,13 +1988,17 @@ local function SnapshotOriginalAvatar()
 	}
 end
 
-local function WeldAccessoryToCharacter(acc, char)
+-- Universal Rig-Agnostic Welder
+local function SafeWeldAccessory(acc, targetChar)
 	local handle = acc:FindFirstChild("Handle")
 	if not handle then return false end
 	handle.CanCollide = false
+	handle.Massless = true
+	handle.CastShadow = false
+
 	local accAtt = handle:FindFirstChildOfClass("Attachment")
 	if accAtt then
-		for _, part in ipairs(char:GetChildren()) do
+		for _, part in ipairs(targetChar:GetChildren()) do
 			if part:IsA("BasePart") then
 				local charAtt = part:FindFirstChild(accAtt.Name)
 				if charAtt then
@@ -1984,13 +2009,13 @@ local function WeldAccessoryToCharacter(acc, char)
 					weld.C0 = accAtt.CFrame
 					weld.C1 = charAtt.CFrame
 					weld.Parent = handle
-					acc.Parent = char
+					acc.Parent = targetChar
 					return true
 				end
 			end
 		end
 	end
-	local head = char:FindFirstChild("Head")
+	local head = targetChar:FindFirstChild("Head")
 	if head then
 		local weld = Instance.new("Weld")
 		weld.Name = "AccessoryWeld"
@@ -1998,49 +2023,129 @@ local function WeldAccessoryToCharacter(acc, char)
 		weld.Part1 = head
 		weld.C0 = CFrame.new(0, 0.5, 0)
 		weld.Parent = handle
-		acc.Parent = char
+		acc.Parent = targetChar
 		return true
 	end
 	return false
 end
 
-local SelectedSkinUserId = "10442891740"
-local CustomSkinUserId = ""
-
-local function ApplySkinById(userIdStr)
-	local numId = tonumber(userIdStr)
-	if not numId or numId <= 0 then return end
+-- METHOD 1: Clone from Live Server Player (0 network wait, 100% offline, pure local memory copy)
+local function CopyOutfitFromPlayer(targetPlayerName)
 	local char = lp.Character
 	if not char or not char.Parent then return end
+	local targetPlayer = Players:FindFirstChild(targetPlayerName)
+	local targetChar = targetPlayer and targetPlayer.Character
+	if not targetChar then
+		warn("[NVL-Win] Target character not found for:", tostring(targetPlayerName))
+		return
+	end
+
 	SnapshotOriginalAvatar()
 
+	-- 1. Clear existing local accessories
+	for _, item in ipairs(char:GetChildren()) do
+		if item:IsA("Accessory") then
+			pcall(function() item:Destroy() end)
+		end
+	end
+
+	-- 2. Clone clothes
+	local targetShirt = targetChar:FindFirstChildOfClass("Shirt")
+	local targetPants = targetChar:FindFirstChildOfClass("Pants")
+	local myShirt = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
+	local myPants = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
+
+	if targetShirt then
+		myShirt.ShirtTemplate = targetShirt.ShirtTemplate
+	else
+		pcall(function() myShirt:Destroy() end)
+	end
+
+	if targetPants then
+		myPants.PantsTemplate = targetPants.PantsTemplate
+	else
+		pcall(function() myPants:Destroy() end)
+	end
+
+	-- 3. Copy body colors
+	local targetBc = targetChar:FindFirstChildOfClass("BodyColors")
+	if targetBc then
+		local myBc = char:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", char)
+		myBc.HeadColor3 = targetBc.HeadColor3
+		myBc.TorsoColor3 = targetBc.TorsoColor3
+		myBc.LeftArmColor3 = targetBc.LeftArmColor3
+		myBc.RightArmColor3 = targetBc.RightArmColor3
+		myBc.LeftLegColor3 = targetBc.LeftLegColor3
+		myBc.RightLegColor3 = targetBc.RightLegColor3
+		for _, p in ipairs(char:GetChildren()) do
+			if p:IsA("BasePart") then
+				local tp = targetChar:FindFirstChild(p.Name)
+				if tp and tp:IsA("BasePart") then
+					p.Color = tp.Color
+				end
+			end
+		end
+	end
+
+	-- 4. Clone accessories directly from target model
+	for _, item in ipairs(targetChar:GetChildren()) do
+		if item:IsA("Accessory") then
+			local clonedAcc = item:Clone()
+			SafeWeldAccessory(clonedAcc, char)
+		end
+	end
+
+	print(string.format("[NVL-Win] Cloned outfit from server player: %s", targetPlayerName))
+end
+
+-- METHOD 2: Universal Fetch by Username or UserId
+local function ApplyUniversalMorph(userQuery)
+	if not userQuery or userQuery == "" then return end
+	local char = lp.Character
+	if not char or not char.Parent then return end
+
 	task.spawn(function()
+		local numId = tonumber(userQuery)
+		if not numId then
+			local nameOk, resolvedId = pcall(function()
+				return Players:GetUserIdFromNameAsync(userQuery)
+			end)
+			if nameOk and resolvedId then
+				numId = resolvedId
+			else
+				warn("[NVL-Win] Could not resolve username:", userQuery)
+				return
+			end
+		end
+
+		SnapshotOriginalAvatar()
+
 		local success, desc = pcall(function()
 			return Players:GetHumanoidDescriptionFromUserId(numId)
 		end)
 		if not success or not desc then
-			warn("[NVL-Win] Failed to get HumanoidDescription for UserId:", numId)
+			warn("[NVL-Win] Failed to get description for ID:", numId)
 			return
 		end
 
-		-- 1. Remove existing accessories
+		-- Clear accessories
 		for _, item in ipairs(char:GetChildren()) do
 			if item:IsA("Accessory") then
 				pcall(function() item:Destroy() end)
 			end
 		end
 
-		-- 2. Apply Clothes
+		-- Clothes
 		if desc.Shirt and desc.Shirt > 0 then
-			local shirt = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
-			shirt.ShirtTemplate = "rbxassetid://" .. desc.Shirt
+			local s = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
+			s.ShirtTemplate = "rbxassetid://" .. desc.Shirt
 		end
 		if desc.Pants and desc.Pants > 0 then
-			local pants = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
-			pants.PantsTemplate = "rbxassetid://" .. desc.Pants
+			local p = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
+			p.PantsTemplate = "rbxassetid://" .. desc.Pants
 		end
 
-		-- 3. Apply Colors
+		-- Colors
 		local bc = char:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", char)
 		if desc.HeadColor then bc.HeadColor3 = desc.HeadColor end
 		if desc.TorsoColor then bc.TorsoColor3 = desc.TorsoColor end
@@ -2060,7 +2165,7 @@ local function ApplySkinById(userIdStr)
 			end
 		end
 
-		-- 4. Load & Weld Accessories
+		-- Accessories
 		local accList = {}
 		pcall(function() accList = desc:GetAccessories(true) end)
 		for _, a in ipairs(accList) do
@@ -2070,16 +2175,95 @@ local function ApplySkinById(userIdStr)
 						return get_obj("rbxassetid://" .. a.AssetId)
 					end)
 					if ok and res and res[1] and res[1]:IsA("Accessory") then
-						WeldAccessoryToCharacter(res[1], char)
+						SafeWeldAccessory(res[1], char)
 					end
 				end)
 			end
 		end
 
-		print("[NVL-Win] Successfully applied client-side Mod Skin for UserId:", numId)
+		print(string.format("[NVL-Win] Applied Universal Outfit for ID: %d (%s)", numId, tostring(userQuery)))
 	end)
 end
 
+-- METHOD 3: Headless Mode (Reversible, 0 camera break)
+local function SetHeadless(enabled)
+	local char = lp.Character
+	local head = char and char:FindFirstChild("Head")
+	if not head then return end
+	head.Transparency = enabled and 1 or 0
+	local face = head:FindFirstChild("face")
+	if face then face.Transparency = enabled and 1 or 0 end
+end
+
+-- METHOD 4: Korblox Right Leg (Clean mesh injection, 0 physics glitch)
+local KorbloxOriginalMeshes = {}
+local function SetKorbloxLeg(enabled)
+	local char = lp.Character
+	if not char then return end
+
+	local rUpper = char:FindFirstChild("RightUpperLeg")
+	local rLower = char:FindFirstChild("RightLowerLeg")
+	local rFoot = char:FindFirstChild("RightFoot")
+	if rUpper or rLower or rFoot then
+		-- R15 Rig
+		if enabled then
+			if rUpper and rUpper:IsA("MeshPart") then
+				KorbloxOriginalMeshes["RightUpperLeg"] = rUpper.MeshId
+				rUpper.MeshId = "rbxassetid://902942093"
+			end
+			if rLower and rLower:IsA("MeshPart") then
+				KorbloxOriginalMeshes["RightLowerLeg"] = rLower.MeshId
+				rLower.MeshId = "rbxassetid://902942096"
+			end
+			if rFoot and rFoot:IsA("MeshPart") then
+				KorbloxOriginalMeshes["RightFoot"] = rFoot.MeshId
+				rFoot.MeshId = "rbxassetid://902942098"
+			end
+		else
+			if rUpper and rUpper:IsA("MeshPart") and KorbloxOriginalMeshes["RightUpperLeg"] then
+				rUpper.MeshId = KorbloxOriginalMeshes["RightUpperLeg"]
+			end
+			if rLower and rLower:IsA("MeshPart") and KorbloxOriginalMeshes["RightLowerLeg"] then
+				rLower.MeshId = KorbloxOriginalMeshes["RightLowerLeg"]
+			end
+			if rFoot and rFoot:IsA("MeshPart") and KorbloxOriginalMeshes["RightFoot"] then
+				rFoot.MeshId = KorbloxOriginalMeshes["RightFoot"]
+			end
+		end
+	else
+		-- R6 Rig
+		local rLeg = char:FindFirstChild("Right Leg")
+		if rLeg then
+			local existingMesh = rLeg:FindFirstChildOfClass("CharacterMesh")
+			if enabled then
+				if not existingMesh then
+					local cm = Instance.new("CharacterMesh", char)
+					cm.Name = "NVL_KorbloxMesh"
+					cm.BodyPart = Enum.BodyPart.RightLeg
+					cm.MeshId = 902942093
+				end
+			else
+				local km = char:FindFirstChild("NVL_KorbloxMesh")
+				if km then km:Destroy() end
+			end
+		end
+	end
+end
+
+-- METHOD 5: Body Material Modifier
+local function SetBodyMaterial(matName, tintColor)
+	local char = lp.Character
+	if not char then return end
+	local targetMat = Enum.Material[matName] or Enum.Material.SmoothPlastic
+	for _, p in ipairs(char:GetChildren()) do
+		if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
+			p.Material = targetMat
+			if tintColor then p.Color = tintColor end
+		end
+	end
+end
+
+-- METHOD 6: Reset Original Skin
 local function ResetOriginalSkin()
 	local char = lp.Character
 	if not char or not OriginalAvatarState then return end
@@ -2109,7 +2293,7 @@ local function ResetOriginalSkin()
 		end
 	end
 
-	-- Restore Colors
+	-- Restore Colors & Materials
 	local bc = char:FindFirstChildOfClass("BodyColors")
 	if bc and OriginalAvatarState.HeadColor then
 		bc.HeadColor3 = OriginalAvatarState.HeadColor
@@ -2120,11 +2304,21 @@ local function ResetOriginalSkin()
 		bc.RightLegColor3 = OriginalAvatarState.RightLegColor
 	end
 
+	for _, p in ipairs(char:GetChildren()) do
+		if p:IsA("BasePart") then
+			p.Material = Enum.Material.SmoothPlastic
+		end
+	end
+
+	-- Restore Headless & Korblox
+	SetHeadless(false)
+	SetKorbloxLeg(false)
+
 	-- Restore Original Accessories
 	for _, acc in ipairs(OriginalAvatarState.Accessories) do
 		if acc then
 			local clone = acc:Clone()
-			WeldAccessoryToCharacter(clone, char)
+			SafeWeldAccessory(clone, char)
 		end
 	end
 
@@ -3022,33 +3216,72 @@ CardViewmodel:CreateSlider({
 })
 
 -- ========================================================================
--- Exploits & Desync Engine (New Method - CFrame Manipulation & Ghost Viz)
+-- Exploits & Desync Engine (New Method - CFrame Manipulation, Ghost & Human Marker Viz)
 -- ========================================================================
 local DesyncState = {
 	Enabled = false,
-	Mode = "Custom",
+	Mode = "Freeze",
 	CustomX = 0,
 	CustomY = 0,
 	CustomZ = 0,
 	RandomAmount = 20,
-	Visualize = false,
+	Visualize = true,
 	VizColor = Color3.fromRGB(186, 145, 252),
-	VizMaterial = Enum.Material.ForceField,
+	VizMaterial = "Neon",
+	VizTransparency = 0.4,
+	ShowIndicator = true,
+	IndicatorColor = Color3.fromRGB(255, 255, 255),
+	PulseEffect = false,
 }
 getgenv().NVL_DesyncState = DesyncState
 
 local GhostClone = nil
+local GhostMarkerGui = nil
+local GhostScreenIndicator = nil
 
 local function RemoveGhostClone()
 	if GhostClone and GhostClone.Parent then
 		GhostClone:Destroy()
 	end
 	GhostClone = nil
+
+	if GhostMarkerGui and GhostMarkerGui.Parent then
+		GhostMarkerGui:Destroy()
+	end
+	GhostMarkerGui = nil
+
+	if GhostScreenIndicator and GhostScreenIndicator.Parent then
+		GhostScreenIndicator:Destroy()
+	end
+	GhostScreenIndicator = nil
+
 	local stray = Workspace:FindFirstChild("NVL_GhostClone")
 	while stray do
 		stray:Destroy()
 		stray = Workspace:FindFirstChild("NVL_GhostClone")
 	end
+end
+
+local function GetDesyncMaterialEnum(matName)
+	if matName == "Neon" then return Enum.Material.Neon
+	elseif matName == "ForceField" then return Enum.Material.ForceField
+	elseif matName == "Glass" then return Enum.Material.Glass
+	elseif matName == "SmoothPlastic" then return Enum.Material.SmoothPlastic
+	elseif matName == "Ghost" then return Enum.Material.ForceField
+	elseif matName == "Wireframe" then return Enum.Material.ForceField
+	end
+	return Enum.Material.Neon
+end
+
+local function GetHumanMarkerAsset()
+	local a = (MemoryAssets and MemoryAssets.Icons and MemoryAssets.Icons.human_marker) or ""
+	if (not a or a == "") and getgenv().Assets and getgenv().Assets.Icons and getgenv().Assets.Icons.human_marker then
+		a = getgenv().Assets.Icons.human_marker
+	end
+	if (not a or a == "") and getcustomasset and isfile and isfile("uisimbl/assets/icons/human_marker.png") then
+		a = getcustomasset("uisimbl/assets/icons/human_marker.png")
+	end
+	return a
 end
 
 local function UpdateGhostClone(cframePos)
@@ -3057,6 +3290,8 @@ local function UpdateGhostClone(cframePos)
 		RemoveGhostClone()
 		return
 	end
+
+	local localHrp = char.HumanoidRootPart
 
 	if not GhostClone or not GhostClone.Parent then
 		local stray = Workspace:FindFirstChild("NVL_GhostClone")
@@ -3070,15 +3305,19 @@ local function UpdateGhostClone(cframePos)
 		char.Archivable = false
 		GhostClone.Name = "NVL_GhostClone"
 
+		local matEnum = GetDesyncMaterialEnum(DesyncState.VizMaterial)
+		local isWireframe = (DesyncState.VizMaterial == "Wireframe")
+		local isGhost = (DesyncState.VizMaterial == "Ghost")
+
 		for _, item in ipairs(GhostClone:GetDescendants()) do
 			if item:IsA("Script") or item:IsA("LocalScript") or item:IsA("Sound") or item:IsA("Decal") then
 				item:Destroy()
 			elseif item:IsA("BasePart") then
 				item.CanCollide = false
 				item.CastShadow = false
-				item.Anchored = false -- Unanchor limbs so model pivots cleanly as one cohesive figure
-				item.Transparency = 0.5
-				item.Material = DesyncState.VizMaterial
+				item.Anchored = false
+				item.Transparency = isWireframe and 1 or (isGhost and 0.8 or DesyncState.VizTransparency)
+				item.Material = matEnum
 				item.Color = DesyncState.VizColor
 			end
 		end
@@ -3091,21 +3330,179 @@ local function UpdateGhostClone(cframePos)
 		local hl = Instance.new("Highlight")
 		hl.Name = "GhostHL"
 		hl.FillColor = DesyncState.VizColor
-		hl.FillTransparency = 0.5
+		hl.FillTransparency = isWireframe and 1 or 0.6
 		hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-		hl.OutlineTransparency = 0.2
+		hl.OutlineTransparency = 0.1
 		hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 		hl.Parent = GhostClone
 
+		-- Sharp Vector Human Marker Indicator (3D BillboardGui)
+		if ghostHrp then
+			local bbg = Instance.new("BillboardGui")
+			bbg.Name = "GhostMarker"
+			bbg.Adornee = ghostHrp
+			bbg.Size = UDim2.new(0, 80, 0, 52)
+			bbg.StudsOffset = Vector3.new(0, 3.8, 0)
+			bbg.AlwaysOnTop = true
+			bbg.LightInfluence = 0
+			bbg.ClipsDescendants = false
+			bbg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+			bbg.Enabled = DesyncState.ShowIndicator
+			bbg.Parent = ghostHrp
+
+			local humanIcon = Instance.new("ImageLabel")
+			humanIcon.Name = "HumanIcon"
+			humanIcon.Size = UDim2.new(0, 24, 0, 24)
+			humanIcon.Position = UDim2.new(0.5, -12, 0, 0)
+			humanIcon.BackgroundTransparency = 1
+			humanIcon.Image = GetHumanMarkerAsset()
+			humanIcon.ImageColor3 = DesyncState.IndicatorColor
+			humanIcon.ScaleType = Enum.ScaleType.Fit
+			humanIcon.ZIndex = 20
+			humanIcon.Parent = bbg
+
+			local titleLbl = Instance.new("TextLabel")
+			titleLbl.Name = "TitleLabel"
+			titleLbl.Size = UDim2.new(1, 0, 0, 14)
+			titleLbl.Position = UDim2.new(0, 0, 0, 24)
+			titleLbl.BackgroundTransparency = 1
+			titleLbl.Font = Enum.Font.GothamBold
+			titleLbl.Text = "DESYNC"
+			titleLbl.TextSize = 10
+			titleLbl.TextColor3 = DesyncState.IndicatorColor
+			titleLbl.TextStrokeTransparency = 0
+			titleLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+			titleLbl.ZIndex = 20
+			titleLbl.Parent = bbg
+
+			local distLbl = Instance.new("TextLabel")
+			distLbl.Name = "DistLabel"
+			distLbl.Size = UDim2.new(1, 0, 0, 12)
+			distLbl.Position = UDim2.new(0, 0, 0, 38)
+			distLbl.BackgroundTransparency = 1
+			distLbl.Font = Enum.Font.GothamMedium
+			distLbl.TextSize = 9
+			distLbl.TextColor3 = DesyncState.VizColor
+			distLbl.TextStrokeTransparency = 0
+			distLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+			distLbl.Text = "[0.0m]"
+			distLbl.ZIndex = 20
+			distLbl.Parent = bbg
+
+			GhostMarkerGui = bbg
+		end
+
 		GhostClone.Parent = Workspace
+	end
+
+	-- Live property synchronization & pulse animation
+	local matEnum = GetDesyncMaterialEnum(DesyncState.VizMaterial)
+	local isWireframe = (DesyncState.VizMaterial == "Wireframe")
+	local isGhost = (DesyncState.VizMaterial == "Ghost")
+
+	local effectiveTrans = isWireframe and 1 or (isGhost and 0.8 or DesyncState.VizTransparency)
+	if DesyncState.PulseEffect then
+		local pulseOffset = (math.sin(tick() * 4) + 1) * 0.15
+		effectiveTrans = math.clamp(effectiveTrans + pulseOffset, 0, 0.95)
 	end
 
 	for _, item in ipairs(GhostClone:GetDescendants()) do
 		if item:IsA("BasePart") then
 			if item.Color ~= DesyncState.VizColor then item.Color = DesyncState.VizColor end
-			if item.Material ~= DesyncState.VizMaterial then item.Material = DesyncState.VizMaterial end
+			if item.Material ~= matEnum then item.Material = matEnum end
+			if item.Transparency ~= effectiveTrans then item.Transparency = effectiveTrans end
 		elseif item:IsA("Highlight") then
 			if item.FillColor ~= DesyncState.VizColor then item.FillColor = DesyncState.VizColor end
+			item.FillTransparency = isWireframe and 1 or math.clamp(effectiveTrans + 0.1, 0, 0.95)
+			item.OutlineColor = DesyncState.IndicatorColor
+		end
+	end
+
+	-- Update 3D Marker
+	if GhostMarkerGui and GhostMarkerGui.Parent then
+		GhostMarkerGui.Enabled = DesyncState.ShowIndicator
+		local icon = GhostMarkerGui:FindFirstChild("HumanIcon")
+		if icon then
+			icon.ImageColor3 = DesyncState.IndicatorColor
+			if icon.Image == "" then icon.Image = GetHumanMarkerAsset() end
+		end
+		local title = GhostMarkerGui:FindFirstChild("TitleLabel")
+		if title then title.TextColor3 = DesyncState.IndicatorColor end
+		local dist = GhostMarkerGui:FindFirstChild("DistLabel")
+		if dist then
+			dist.TextColor3 = DesyncState.VizColor
+			local distStuds = (localHrp.Position - cframePos.Position).Magnitude
+			dist.Text = string.format("[%.1fm]", distStuds)
+		end
+	end
+
+	-- Off-screen directional indicator
+	if DesyncState.ShowIndicator and Camera then
+		local screenPos, onScreen = Camera:WorldToViewportPoint(cframePos.Position)
+		if not onScreen then
+			if not GhostScreenIndicator or not GhostScreenIndicator.Parent then
+				local gui = Instance.new("ScreenGui")
+				gui.Name = "NVL_DesyncScreenIndicator"
+				gui.ResetOnSpawn = false
+				gui.DisplayOrder = 90
+				gui.Parent = CoreGui
+
+				local arrowFrame = Instance.new("Frame")
+				arrowFrame.Name = "Pointer"
+				arrowFrame.Size = UDim2.new(0, 36, 0, 36)
+				arrowFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+				arrowFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+				arrowFrame.BorderSizePixel = 0
+				arrowFrame.Parent = gui
+
+				Instance.new("UICorner", { CornerRadius = UDim.new(0, 8), Parent = arrowFrame })
+				local stroke = Instance.new("UIStroke")
+				stroke.Name = "Stroke"
+				stroke.Color = DesyncState.VizColor
+				stroke.Thickness = 1.5
+				stroke.Parent = arrowFrame
+
+				local icon = Instance.new("ImageLabel")
+				icon.Name = "Icon"
+				icon.Size = UDim2.new(0, 20, 0, 20)
+				icon.Position = UDim2.new(0.5, -10, 0.5, -10)
+				icon.BackgroundTransparency = 1
+				icon.Image = GetHumanMarkerAsset()
+				icon.ImageColor3 = DesyncState.IndicatorColor
+				icon.ScaleType = Enum.ScaleType.Fit
+				icon.Parent = arrowFrame
+
+				GhostScreenIndicator = gui
+			end
+
+			local pointer = GhostScreenIndicator:FindFirstChild("Pointer")
+			if pointer then
+				pointer.Visible = true
+				local stroke = pointer:FindFirstChild("Stroke")
+				if stroke then stroke.Color = DesyncState.VizColor end
+				local icon = pointer:FindFirstChild("Icon")
+				if icon then icon.ImageColor3 = DesyncState.IndicatorColor end
+
+				local vpSize = Camera.ViewportSize
+				local center = Vector2.new(vpSize.X / 2, vpSize.Y / 2)
+				local dir = Vector2.new(screenPos.X - center.X, screenPos.Y - center.Y)
+				if screenPos.Z < 0 then
+					dir = -dir
+				end
+				local unitDir = dir.Magnitude > 0 and dir.Unit or Vector2.new(0, 1)
+				local edgeMargin = 50
+				local clampedX = math.clamp(center.X + unitDir.X * (center.X - edgeMargin), edgeMargin, vpSize.X - edgeMargin)
+				local clampedY = math.clamp(center.Y + unitDir.Y * (center.Y - edgeMargin), edgeMargin, vpSize.Y - edgeMargin)
+				pointer.Position = UDim2.new(0, clampedX, 0, clampedY)
+			end
+		else
+			if GhostScreenIndicator and GhostScreenIndicator:FindFirstChild("Pointer") then
+				GhostScreenIndicator.Pointer.Visible = false
+			end
+		end
+	else
+		if GhostScreenIndicator and GhostScreenIndicator:FindFirstChild("Pointer") then
+			GhostScreenIndicator.Pointer.Visible = false
 		end
 	end
 
@@ -3305,7 +3702,7 @@ local CardDesyncViz = ExploitsTab:CreateCard({
 })
 CardDesyncViz:CreateToggle({
 	Name = "Visualize Desync",
-	Default = false,
+	Default = true,
 	ColorBadge = true,
 	ColorValue = DesyncState.VizColor,
 	Callback = function(v)
@@ -3318,10 +3715,39 @@ CardDesyncViz:CreateToggle({
 })
 CardDesyncViz:CreateDropdown({
 	Name = "Visualize Material",
-	Options = { "ForceField", "Neon", "Glass", "SmoothPlastic" },
-	Default = "ForceField",
+	Options = { "Neon", "ForceField", "Glass", "Ghost", "Wireframe", "SmoothPlastic" },
+	Default = "Neon",
 	Callback = function(opt)
-		DesyncState.VizMaterial = Enum.Material[opt] or Enum.Material.ForceField
+		DesyncState.VizMaterial = opt
+	end,
+})
+CardDesyncViz:CreateSlider({
+	Name = "Ghost Transparency",
+	Min = 0,
+	Max = 1,
+	Default = 0.4,
+	Decimals = 2,
+	Callback = function(v)
+		DesyncState.VizTransparency = v
+	end,
+})
+CardDesyncViz:CreateToggle({
+	Name = "Human Marker Indicator",
+	Default = true,
+	ColorBadge = true,
+	ColorValue = DesyncState.IndicatorColor,
+	Callback = function(v)
+		DesyncState.ShowIndicator = v
+	end,
+	ColorCallback = function(c)
+		DesyncState.IndicatorColor = c
+	end,
+})
+CardDesyncViz:CreateToggle({
+	Name = "Pulse Animation",
+	Default = false,
+	Callback = function(v)
+		DesyncState.PulseEffect = v
 	end,
 })
 

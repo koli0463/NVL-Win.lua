@@ -42,24 +42,35 @@ end)
 Assets = Assets or {}
 Assets.Icons = Assets.Icons or {}
 
--- Guarantee reset icon is loaded (offline custom asset PNG, 0 font dependency)
-if not Assets.Icons['reset'] or Assets.Icons['reset'] == "" then
-	pcall(function()
-		local p = 'uisimbl/assets/icons/reset.png'
-		if isfile and isfile(p) and getcustomasset then
-			Assets.Icons['reset'] = getcustomasset(p)
-		else
-			local decode = (crypt and (crypt.base64_decode or crypt.base64decode)) or (base64_decode or base64decode)
-			if decode and writefile and getcustomasset then
-				if isfolder and not isfolder('uisimbl') then makefolder('uisimbl') end
-				if isfolder and not isfolder('uisimbl/assets') then makefolder('uisimbl/assets') end
-				if isfolder and not isfolder('uisimbl/assets/icons') then makefolder('uisimbl/assets/icons') end
-				writefile(p, decode('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACmElEQVR4nO2WO2hUQRSG/5NNoqKI4gMlhcFCBO0kaRUl2tjYqKCNiJXYWVlZiliJ1hosRLBIIILY2Fn5QCGNnQiKgoIkBvPY/eSYM2Fyubt7dxO1yQ/DzJ05c+a8z5XW8J9hVYiAHkk9ZraQ7S27a2asqgDEo5LqiTnQm47NrF6grwW/JfquAFg8nu8dAO4C1/IHgS0xNpQIs2IL7Jd0UtIpScOSXPsjkjZKOi1pSNLuIJ+S9FLShKQnZvY1lKCyNYCe0P4QMAH8Yjk+AW9pjy/AldyinQowCMwEszmgDjSyB3yvGWaz9SNgW/BsKoQVhKh5cAHnJT3wgJKU/OmmbMS3m/y5pDdxtkfSiKSB+J6VtE7SMzM74cqZWaNyAAL9wKvQJFnAZ8dtYKDk7mY3PfAj6KZjvpmUq+qKWsyHgYVsOC7ldJ6WMZaYA8PA96D3mDlXllktBWDxwvHQOvn1Tpz3lTGLO/2xPgPcSHWjciAWLHA/c8EUsD3c01KTkhpSuSYoRawXFuB9FtFjZcxbCRGuaat5b3HDC0dUtp3Z9uuYXYC20RwR3z7qtciwGfIK1n1t71KAeUk/s+/Bvy1IWRCORf77+AysT9VSLdCu8lWxgMU8Hmu3xi5JF8O3fS0e94pXvQG1yYQdUVBSIfJUHCoUoVo+4mxT1lesWyFqMV+ONEyd8RtwtsU9r4LvgNFcoZUK8bgghOMFcBU4ChwDLgDjhU45mltjJa7YCjwNpo1Cyy3CXTUf64/A3o76QBG55MD1wuMLofFc9mjCQxe8yKMrkAUTcBC4BUxmHTLhA3APGClToBmsA0H+/KyktaR9kZ6OaUmTZjYT5539D1ZFajItzpfSsSqsE+LsIb+XRkJj1TVeg/4BfgN6haWYutuDDwAAAABJRU5ErkJggg=='))
-				Assets.Icons['reset'] = getcustomasset(p)
-			end
+-- Guarantee reset and human marker icons are loaded (offline custom asset PNG, 0 font dependency)
+pcall(function()
+	local decode = (crypt and (crypt.base64_decode or crypt.base64decode)) or (base64_decode or base64decode)
+	if isfolder and not isfolder('uisimbl') then makefolder('uisimbl') end
+	if isfolder and not isfolder('uisimbl/assets') then makefolder('uisimbl/assets') end
+	if isfolder and not isfolder('uisimbl/assets/icons') then makefolder('uisimbl/assets/icons') end
+
+	local pReset = 'uisimbl/assets/icons/reset.png'
+	local b64Reset = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAFDUlEQVR4nO1az6tVVRT+9rnPn0FlSg6URhUWBCGvRDSUQqtJOBIaWhSJBDVxqjMnwgPDiQjSKBT/ABXFQRPTEiyCzIcETYpSU0Oq++OLdV2Lu952n3ffve+e6z33ng8O5559197nfGut/WOtvYEKFSqMEkhmmFRwwsnX9P7axCmC5BK97yd5yitk7EFySu97+BD7ffmkkP+IHbwz9h5AMji3N/JNkg9IbtDybNwI18Ties8i8nW93yb5pNXBuBBH+r8ZZ3lTwFXxjGGSnyqiUSVQCyE0ADRVCRsBbAHwBoDnAEyLKACRNcKzIYS6yjdRRgWQFOLy8Q2SawHsBbAbwEuRqMiYd4giBD/pvZweQHJKrE7yKQCfA/gEwFr7W0mbxX3XMMK/oMR9PdPfb5O87qY1cWnpBvOhqdfm0k2BnEv+QES8lSDbynm+T/JZaxMlJH9MiTRyLN7Qy0jbb5P9keTy0pCPAhgj/1/Cws2o7E5kfakjOF+qBRA7y9iDjnzK6oZzJHeRXENyhz57uS9K0//ZsfxbasW4v7eca18SwjntvEvymsp9VoogiNrvZaojORv145j8jPOUTJfBtiy2sUOWx3tJvmpyKIn1DyrJeo7bf7yA5fDou7uHkgnaj/9IDHBGfkblu67rtb2pUoz+7LjzgcQgZ27/rYv8Rp9UL1BrLSN5I+rrXgHbSune3eAGrel5XP9C2chnfchu1d+pcPUwSoasB1kLWbfrPbhysfifAC5pWQvjqAA+HNTWROVG9jqAv6SrhBBMWeOhAJIhhCBEJc5/MaprZK8o8dFeyETIepQXD2hncxO4jRIi66NOXv8uzci/WA+o5fw32kHMYhQQQrAB8B6AG1Hft9lAsryPZQawJXrRHhA0zX3L3mvlen+Z5BNutigEcduahZZRmhpxhqIXQt/Yu125WH2dKKGPdnuCI9oOrSUFT3IlyadlpnLeWlgY/GYiB2BL4RNetghILBI9Hyb5K8lbJE+TfEbLB6sEaoOaCPlNYwGLByww+pfkCz5ZOqh3q9UlwrwiZwg0rXaUj+KyeEM/3aEXLzieSIaYF9gBh7z1wmLC8H0JwpaFbqkBBB/6ekVEhBtI/jNPVLhH5ZYOkPwrJO/pOyz7HKff63od8nWL8oIvE15gH/W3nPVRub53ex35VSS/T4w9pnS7zAPe8986UFD7FsnnnUW8F9gHyqC025NZiCLiHCLJjbpt7j3MKzzGMX1XcTEJO16wL2dPwFvpiG15aR0bzGrR1S5zcktJfqpKTpG35/MkT5K8aKl1U2RhCojc83SOEnwf/V3ziOvRBXJCRA9M/ZCjUE/+pu5Eo1/ioRfhxIvkkg84C0D6fD0RLfpzAPcBXNbEyXcA7uqCSuq8rocopJ31rm4Wfae1dwfAzhCCJGGXmKyuVocDdmaFVTr/miekdoDj/YP5kLfB6s8S2SD7eKNQzlXCmYSbxopoKBEj2UyUxTAZwc+O/GhEoHQjru4Y1aMPT43WC4EnLviK5Gp9T22UzwpsinZ/zX39qi3lHd5DvIwMiO+7d41u2o1zpzLbBk/1/2Z0pSCLnw9sRVnE+j6gAJiFNJEqzxIm79QjctM6c8yZvgA80OsagK8BnJPQ27Vhp88GioDivaEdo7uyFQAkcSJK8f14VjJOIYS73doYJAKGAPUIudjNil62SOKGgCHD9eF4IBOi7dTWsL+pQoUKFSpUqFABk4j/AVZTYHDzt73MAAAAAElFTkSuQmCC'
+	if decode and writefile then
+		if not isfile or not isfile(pReset) or (readfile and #readfile(pReset) < 1500) then
+			writefile(pReset, decode(b64Reset))
 		end
-	end)
-end
+	end
+	if getcustomasset and isfile and isfile(pReset) then
+		Assets.Icons['reset'] = getcustomasset(pReset)
+	end
+
+	local pHuman = 'uisimbl/assets/icons/human_marker.png'
+	local b64Human = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAD2klEQVR4nO1bvWtUQRD/zd7hBzHgF0FTpFJQiKVaWkgiWPgvCAEbq1hYm97CVrCysBCsLSwSxULFQhEtjHZqjIiNBoO5j5/sZdaMj3vJxbzNvXfrD5bL2+zOvpnZnZmd3Qf8R9qQfg5O8s/4IkKkAJJCsm6Z1/oaSYdBBsla5nkfyb22PttmYEDVLskRkjMkn5H8puUNyVskx7VNX5dmTObPkfzEfKyQnNZlMhgzgcoIyQnDaINki2RbS8vUeczYvpUFVzXpywGSi8psc50Z0NZZ4H/PVF4IXNP+jNH8RggCmvNLp9KegWsu72UP2rezwJdlkmNKJ5oQXEzmNbgZBuAZkR7H8+18v50Ajpi6KHCIj14ZL6rfpuBiEfbaV3++DOCrarXXcNf3awBY0OdoYbKLRTjQFxEvgIfKVLuHPqHNewDvdCn10q/UAdAxNYANNXDr4Zf+Xqy8G8y4wmnj5poZQYRgKDB/T11gtZnvMhOuZbTdMtFfwF3dJHWCKAwKqMyQPEvyAcklw7RfGq9ITmXbx4ZsxyCGmZqINLVuzPj5RQBvRcTPhmCYWfkkCTUS3EL/6EkSiUXYv3hwX2rMhjNj2kDHazq4uqD1FRH5maVVCQFQX5jkKIArAM4DOLxJMj8AzAK4KSI+eeKXTwsVsvinSC5w6/AG8KlXYX9/yjJL8rASib5sZliA6cJHaO8sQHV4JG8bpgvYgZ4PFfhFjoLXMGuzmt6N4ALasyK0FZdaZ0AcFxtS2Hv7VAg1G97ARxSA1uUkQ35gdEwVJl3gwTQCXYioHC6DtWKLwqn65A4HBKHQ+JwSBwOicNFosuq0HWRXFWseL1WWgHI6jmAp/cdwLzu79sFan3JZ43073ZZZ4DTlNedAmm3ldasiHzUvEA5U2XU3RrJXSQfmXR3N7RMijzv0DRsiz+QPBpjNxjzHOB05tLDVrbCV5XmP+cXt9UIcnVrPKlb2ex6DdP3BYA5LY9zNjoh9p9UmoXnBeuIADWIebS9ADwzl0XkaaeC3AHgM4D95v9/vac5bC2/ABQbGaohs559xng95qIZvTr6h7ZJm/ft9NchcTgkDofE4ZA4HBKHQ+JwSBwOicMhcTgkDheZfl4M323Dw0EUgHRhzMf9nZNkUxdOkrM3QKh11bkux7UbIuPmckPTfBXiMU9yyH5BRvK2SYKEbFHoP1X6yxE5QpgyN0UCXpM8GdqZWyUHSd7PtPU3R2/E/HBCEAnmotQIgHEznZ+ISMN8T5Dt54WzRx8XRCRkgqsH5kzZbtrMuxpb2XuCAcqUyyRC2KPQWNmr8v+BauA3EkVxLs2+xjkAAAAASUVORK5CYII='
+	if decode and writefile then
+		if not isfile or not isfile(pHuman) or (readfile and #readfile(pHuman) < 1000) then
+			writefile(pHuman, decode(b64Human))
+		end
+	end
+	if getcustomasset and isfile and isfile(pHuman) then
+		Assets.Icons['human_marker'] = getcustomasset(pHuman)
+	end
+end)
 
 -- Ensure logos are resolved
 local function GetLogoAsset(preferLeywin)
@@ -3032,18 +3043,25 @@ function MemoryUI:CreateWindow(config)
 					Thickness = 1,
 				})
 				local resetAsset = (Assets.Icons and Assets.Icons.reset) or ""
-				if (not resetAsset or resetAsset == "") and isfile and isfile("uisimbl/assets/icons/reset.png") and getcustomasset then
-					resetAsset = getcustomasset("uisimbl/assets/icons/reset.png")
+				if (not resetAsset or resetAsset == "") and _G.MemoryAssets and _G.MemoryAssets.Icons and _G.MemoryAssets.Icons.reset then
+					resetAsset = _G.MemoryAssets.Icons.reset
+				end
+				if (not resetAsset or resetAsset == "") and getcustomasset and isfile then
+					if isfile("uisimbl/assets/icons/reset.png") then
+						resetAsset = getcustomasset("uisimbl/assets/icons/reset.png")
+					elseif isfile("reset.png") then
+						resetAsset = getcustomasset("reset.png")
+					end
 				end
 
 				local ResetIcon = Create("ImageLabel", {
 					Name = "Icon",
 					Parent = ResetBtn,
-					Size = UDim2.new(0, 13, 0, 13),
-					Position = UDim2.new(0.5, -6.5, 0.5, -6.5),
+					Size = UDim2.new(0, 14, 0, 14),
+					Position = UDim2.new(0.5, -7, 0.5, -7),
 					BackgroundTransparency = 1,
 					Image = resetAsset or "",
-					ImageColor3 = Color3.fromRGB(140, 145, 160),
+					ImageColor3 = Color3.fromRGB(165, 170, 190),
 					ScaleType = Enum.ScaleType.Fit,
 					ZIndex = 7,
 				})
