@@ -3550,7 +3550,7 @@ function MemoryUI:CreateWindow(config)
 			-- ============================================================
 			function Card:CreateCenteredBox(boxConfig)
 				boxConfig = boxConfig or {}
-				local text = boxConfig.Text or "Example"
+				local text = boxConfig.Text or boxConfig.Name or "Example"
 				local isDanger = (boxConfig.Danger == true) or (boxConfig.Red == true) or (boxConfig.Color == "Red")
 				local callback = boxConfig.Callback or function() end
 

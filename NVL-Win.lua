@@ -1381,6 +1381,10 @@ local VisualsState = {
 	SelfTrailColor = Color3.fromRGB(186, 145, 252),
 	SelfStepRings = false,
 	SelfStepColor = Color3.fromRGB(186, 145, 252),
+	SelfAura = false,
+	SelfAuraEffect = "None",
+	SelfAuraColor = Color3.fromRGB(186, 145, 252),
+	SelfAuraSize = 3,
 
 	-- Chams & Highlights
 	Chams = true,
@@ -1508,8 +1512,8 @@ local function CreateOrUpdatePlayerESP(player)
 	local bbg = Instance.new("BillboardGui")
 	bbg.Name = player.Name .. "_BBG"
 	bbg.Adornee = hrp
-	bbg.Size = UDim2.new(4.2, 0, 5.8, 0)
-	bbg.StudsOffset = Vector3.new(0, -0.1, 0)
+	bbg.Size = UDim2.new(5.2, 0, 5.8, 0)
+	bbg.StudsOffset = Vector3.new(-0.2, -0.1, 0)
 	bbg.AlwaysOnTop = VisualsState.ThroughWalls
 	bbg.LightInfluence = 0
 	bbg.ClipsDescendants = false
@@ -1521,8 +1525,8 @@ local function CreateOrUpdatePlayerESP(player)
 	-- Black Outline Wrapper
 	local outlineFrame = Instance.new("Frame")
 	outlineFrame.Name = "BoxOutline"
-	outlineFrame.Size = UDim2.new(1, 4, 1, 4)
-	outlineFrame.Position = UDim2.new(0, -2, 0, -2)
+	outlineFrame.Size = UDim2.new(1, -34, 1, 2)
+	outlineFrame.Position = UDim2.new(0, 33, 0, -1)
 	outlineFrame.BackgroundTransparency = 1
 	outlineFrame.Visible = VisualsState.Boxes and VisualsState.BoxOutline
 	outlineFrame.Parent = bbg
@@ -1536,7 +1540,8 @@ local function CreateOrUpdatePlayerESP(player)
 	-- Main Bounding Box
 	local boxFrame = Instance.new("Frame")
 	boxFrame.Name = "Box"
-	boxFrame.Size = UDim2.new(1, 0, 1, 0)
+	boxFrame.Size = UDim2.new(1, -36, 1, 0)
+	boxFrame.Position = UDim2.new(0, 34, 0, 0)
 	boxFrame.BackgroundTransparency = VisualsState.FilledBox and VisualsState.FilledBoxTransparency or 1
 	boxFrame.BackgroundColor3 = VisualsState.FilledBoxColor
 	boxFrame.BorderSizePixel = 0
@@ -1554,7 +1559,7 @@ local function CreateOrUpdatePlayerESP(player)
 	local nameLbl = Instance.new("TextLabel")
 	nameLbl.Name = "NameLabel"
 	nameLbl.Size = UDim2.new(0, 240, 0, 16)
-	nameLbl.Position = UDim2.new(0.5, 0, 0, -18)
+	nameLbl.Position = UDim2.new(0.5, 17, 0, -18)
 	nameLbl.AnchorPoint = Vector2.new(0.5, 1)
 	nameLbl.BackgroundTransparency = 1
 	nameLbl.Font = Enum.Font.GothamBold
@@ -1566,11 +1571,11 @@ local function CreateOrUpdatePlayerESP(player)
 	nameLbl.Visible = VisualsState.NameTags
 	nameLbl.Parent = bbg
 
-	-- Health Bar Frame
+	-- Health Bar Frame (Always in positive coords to prevent quad-clipping)
 	local hpFrame = Instance.new("Frame")
 	hpFrame.Name = "HealthBar"
 	hpFrame.Size = UDim2.new(0, 4, 1, 0)
-	hpFrame.Position = UDim2.new(0, -7, 0, 0)
+	hpFrame.Position = UDim2.new(0, 26, 0, 0)
 	hpFrame.BackgroundColor3 = Color3.fromRGB(15, 16, 20)
 	hpFrame.BorderSizePixel = 0
 	hpFrame.ZIndex = 10
@@ -1597,12 +1602,12 @@ local function CreateOrUpdatePlayerESP(player)
 
 	local hpText = Instance.new("TextLabel")
 	hpText.Name = "HealthText"
-	hpText.Size = UDim2.new(0, 26, 0, 14)
-	hpText.AnchorPoint = Vector2.new(1, 0.5)
-	hpText.Position = UDim2.new(0, -9, 1 - pct, 0)
+	hpText.Size = UDim2.new(0, 22, 0, 14)
+	hpText.AnchorPoint = Vector2.new(1, 0)
+	hpText.Position = UDim2.new(0, 24, math.clamp(1 - pct, 0, 0.9), 0)
 	hpText.BackgroundTransparency = 1
 	hpText.Font = Enum.Font.GothamBold
-	hpText.TextSize = 11
+	hpText.TextSize = 10
 	hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
 	hpText.TextStrokeTransparency = 0
 	hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -1616,7 +1621,7 @@ local function CreateOrUpdatePlayerESP(player)
 	local distLbl = Instance.new("TextLabel")
 	distLbl.Name = "DistanceLabel"
 	distLbl.Size = UDim2.new(0, 200, 0, 14)
-	distLbl.Position = UDim2.new(0.5, 0, 1, 18)
+	distLbl.Position = UDim2.new(0.5, 17, 1, 4)
 	distLbl.AnchorPoint = Vector2.new(0.5, 0)
 	distLbl.BackgroundTransparency = 1
 	distLbl.Font = Enum.Font.GothamMedium
@@ -1634,6 +1639,8 @@ local function CreateOrUpdatePlayerESP(player)
 	local weaponLbl = Instance.new("TextLabel")
 	weaponLbl.Name = "WeaponLabel"
 	weaponLbl.Size = UDim2.new(0, 200, 0, 14)
+	weaponLbl.Position = UDim2.new(0.5, 17, 1, 18)
+	weaponLbl.AnchorPoint = Vector2.new(0.5, 0)
 	weaponLbl.Position = UDim2.new(0.5, 0, 1, 4)
 	weaponLbl.AnchorPoint = Vector2.new(0.5, 0)
 	weaponLbl.BackgroundTransparency = 1
@@ -1660,7 +1667,7 @@ local function CreateOrUpdatePlayerESP(player)
 		hpFill.BackgroundColor3 = GetHealthColor(newPct)
 
 		hpText.Text = tostring(math.floor(newCur))
-		hpText.Position = UDim2.new(0, -9, 1 - newPct, 0)
+		hpText.Position = UDim2.new(0, 24, math.clamp(1 - newPct, 0, 0.9), 0)
 
 		if newCur <= 0 then
 			hl.Enabled = false
@@ -2047,10 +2054,143 @@ local function UpdateSelfTrail()
 	ActiveSelfTrail = trail
 end
 
+-- ========================================================================
+-- Self Aura Engine (Client-Side Particle Aura for Local Character)
+-- ========================================================================
+local SelfAuraAttachment = nil
+local SelfAuraEmitter = nil
+
+local function RemoveSelfAura()
+	if SelfAuraEmitter and SelfAuraEmitter.Parent then
+		pcall(function() SelfAuraEmitter:Destroy() end)
+	end
+	SelfAuraEmitter = nil
+
+	if SelfAuraAttachment and SelfAuraAttachment.Parent then
+		pcall(function() SelfAuraAttachment:Destroy() end)
+	end
+	SelfAuraAttachment = nil
+
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		local stray = hrp:FindFirstChild("NVL_SelfAuraAttachment")
+		while stray do
+			stray:Destroy()
+			stray = hrp:FindFirstChild("NVL_SelfAuraAttachment")
+		end
+	end
+end
+
+local function UpdateSelfAura()
+	if not VisualsState.SelfAura or VisualsState.SelfAuraEffect == "None" then
+		RemoveSelfAura()
+		return
+	end
+
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local att = hrp:FindFirstChild("NVL_SelfAuraAttachment")
+	if not att then
+		att = Instance.new("Attachment")
+		att.Name = "NVL_SelfAuraAttachment"
+		att.Position = Vector3.new(0, -0.5, 0)
+		att.Parent = hrp
+	end
+	SelfAuraAttachment = att
+
+	local emitter = att:FindFirstChild("SelfAuraEmitter")
+	if not emitter then
+		emitter = Instance.new("ParticleEmitter")
+		emitter.Name = "SelfAuraEmitter"
+		emitter.Parent = att
+	end
+	SelfAuraEmitter = emitter
+
+	local szMul = math.clamp(VisualsState.SelfAuraSize / 3, 0.4, 3)
+	local auraCol = VisualsState.SelfAuraColor
+	local effect = VisualsState.SelfAuraEffect
+
+	if effect == "Electric Sparks" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 35
+		emitter.Lifetime = NumberRange.new(0.3, 0.7)
+		emitter.Speed = NumberRange.new(4, 8)
+		emitter.SpreadAngle = Vector2.new(180, 180)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.4 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)})
+	elseif effect == "Cosmic Stardust" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 0.9
+		emitter.LightInfluence = 0
+		emitter.Rate = 25
+		emitter.Lifetime = NumberRange.new(1.0, 1.8)
+		emitter.Speed = NumberRange.new(0.5, 2.5)
+		emitter.SpreadAngle = Vector2.new(360, 360)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.5, 0.5 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 1)})
+	elseif effect == "Dark Flame" then
+		emitter.Texture = "rbxasset://textures/particles/fire_main.dds"
+		emitter.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, auraCol), ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 30))})
+		emitter.LightEmission = 0.7
+		emitter.LightInfluence = 0
+		emitter.Rate = 40
+		emitter.Lifetime = NumberRange.new(0.5, 1.0)
+		emitter.Speed = NumberRange.new(2, 5)
+		emitter.SpreadAngle = Vector2.new(45, 45)
+		emitter.Acceleration = Vector3.new(0, 6, 0)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6 * szMul), NumberSequenceKeypoint.new(1, 1.8 * szMul)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)})
+	elseif effect == "Cyber Matrix" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 45
+		emitter.Lifetime = NumberRange.new(0.4, 0.9)
+		emitter.Speed = NumberRange.new(5, 10)
+		emitter.SpreadAngle = Vector2.new(90, 90)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)})
+	elseif effect == "Angelic Halo" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 20
+		emitter.Lifetime = NumberRange.new(0.8, 1.4)
+		emitter.Speed = NumberRange.new(0.2, 0.8)
+		emitter.SpreadAngle = Vector2.new(20, 20)
+		emitter.Acceleration = Vector3.new(0, 3, 0)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2 * szMul), NumberSequenceKeypoint.new(0.5, 0.8 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3), NumberSequenceKeypoint.new(1, 1)})
+	elseif effect == "Pulsing Ring" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 18
+		emitter.Lifetime = NumberRange.new(0.6, 1.2)
+		emitter.Speed = NumberRange.new(3, 7)
+		emitter.SpreadAngle = Vector2.new(180, 0)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3 * szMul), NumberSequenceKeypoint.new(1, 2.0 * szMul)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)})
+	end
+end
+
 lp.CharacterAdded:Connect(function()
 	task.delay(0.3, function()
 		if VisualsState.SelfTrail then
 			UpdateSelfTrail()
+		end
+		if VisualsState.SelfAura then
+			UpdateSelfAura()
 		end
 	end)
 end)
@@ -2119,6 +2259,8 @@ local function SnapshotOriginalAvatar()
 	local bc = char:FindFirstChildOfClass("BodyColors")
 	local shirt = char:FindFirstChildOfClass("Shirt")
 	local pants = char:FindFirstChildOfClass("Pants")
+	local head = char:FindFirstChild("Head")
+	local face = head and head:FindFirstChild("face")
 	local origAccs = {}
 	for _, acc in ipairs(char:GetChildren()) do
 		if acc:IsA("Accessory") then
@@ -2134,6 +2276,7 @@ local function SnapshotOriginalAvatar()
 		RightLegColor = bc and bc.RightLegColor3,
 		Shirt = shirt and shirt.ShirtTemplate or "",
 		Pants = pants and pants.PantsTemplate or "",
+		FaceTexture = face and face.Texture or "rbxasset://textures/face.png",
 		Accessories = origAccs,
 	}
 end
@@ -2152,6 +2295,11 @@ local function SafeWeldAccessory(acc, targetChar)
 			if part:IsA("BasePart") then
 				local charAtt = part:FindFirstChild(accAtt.Name)
 				if charAtt then
+					for _, w in ipairs(handle:GetChildren()) do
+						if w:IsA("Weld") or w:IsA("WeldConstraint") then
+							pcall(function() w:Destroy() end)
+						end
+					end
 					local weld = Instance.new("Weld")
 					weld.Name = "AccessoryWeld"
 					weld.Part0 = handle
@@ -2167,6 +2315,11 @@ local function SafeWeldAccessory(acc, targetChar)
 	end
 	local head = targetChar:FindFirstChild("Head")
 	if head then
+		for _, w in ipairs(handle:GetChildren()) do
+			if w:IsA("Weld") or w:IsA("WeldConstraint") then
+				pcall(function() w:Destroy() end)
+			end
+		end
 		local weld = Instance.new("Weld")
 		weld.Name = "AccessoryWeld"
 		weld.Part0 = handle
@@ -2248,11 +2401,11 @@ local function CopyOutfitFromPlayer(targetPlayerName)
 	print(string.format("[NVL-Win] Cloned outfit from server player: %s", targetPlayerName))
 end
 
--- METHOD 2: Universal Fetch by Username or UserId
-local function ApplyUniversalMorph(userQuery)
-	if not userQuery or userQuery == "" then return end
+-- METHOD 2: Catalog Decompiler Engine (Decompile Full User Avatar via Roblox Web API)
+local function DecompileCatalogUser(userQuery)
+	if not userQuery or userQuery == "" then return false end
 	local char = lp.Character
-	if not char or not char.Parent then return end
+	if not char or not char.Parent then return false end
 
 	task.spawn(function()
 		local numId = tonumber(userQuery)
@@ -2264,74 +2417,213 @@ local function ApplyUniversalMorph(userQuery)
 				numId = resolvedId
 			else
 				warn("[NVL-Win] Could not resolve username:", userQuery)
-				return
+				pcall(function()
+					Window:SendNotification({
+						Title = "Catalog Decompiler",
+						Description = "Could not resolve username: " .. tostring(userQuery),
+						Duration = 3,
+					})
+				end)
+				return false
 			end
 		end
 
 		SnapshotOriginalAvatar()
 
-		local success, desc = pcall(function()
-			return Players:GetHumanoidDescriptionFromUserId(numId)
+		local okApp, app = pcall(function()
+			return Players:GetCharacterAppearanceAsync(numId)
 		end)
-		if not success or not desc then
-			warn("[NVL-Win] Failed to get description for ID:", numId)
-			return
-		end
 
-		-- Clear accessories
-		for _, item in ipairs(char:GetChildren()) do
-			if item:IsA("Accessory") then
-				pcall(function() item:Destroy() end)
-			end
-		end
-
-		-- Clothes
-		if desc.Shirt and desc.Shirt > 0 then
-			local s = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
-			s.ShirtTemplate = "rbxassetid://" .. desc.Shirt
-		end
-		if desc.Pants and desc.Pants > 0 then
-			local p = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
-			p.PantsTemplate = "rbxassetid://" .. desc.Pants
-		end
-
-		-- Colors
-		local bc = char:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", char)
-		if desc.HeadColor then bc.HeadColor3 = desc.HeadColor end
-		if desc.TorsoColor then bc.TorsoColor3 = desc.TorsoColor end
-		if desc.LeftArmColor then bc.LeftArmColor3 = desc.LeftArmColor end
-		if desc.RightArmColor then bc.RightArmColor3 = desc.RightArmColor end
-		if desc.LeftLegColor then bc.LeftLegColor3 = desc.LeftLegColor end
-		if desc.RightLegColor then bc.RightLegColor3 = desc.RightLegColor end
-		for _, p in ipairs(char:GetChildren()) do
-			if p:IsA("BasePart") then
-				if p.Name:find("Head") then p.Color = bc.HeadColor3
-				elseif p.Name:find("Torso") then p.Color = bc.TorsoColor3
-				elseif p.Name:find("Arm") or p.Name:find("Hand") then
-					p.Color = p.Name:find("Left") and bc.LeftArmColor3 or bc.RightArmColor3
-				elseif p.Name:find("Leg") or p.Name:find("Foot") then
-					p.Color = p.Name:find("Left") and bc.LeftLegColor3 or bc.RightLegColor3
+		if okApp and app then
+			-- 1. Wipe current accessories
+			for _, item in ipairs(char:GetChildren()) do
+				if item:IsA("Accessory") then
+					pcall(function() item:Destroy() end)
 				end
 			end
-		end
 
-		-- Accessories
-		local accList = {}
-		pcall(function() accList = desc:GetAccessories(true) end)
-		for _, a in ipairs(accList) do
-			if a.AssetId and a.AssetId > 0 and get_obj then
-				task.spawn(function()
-					local ok, res = pcall(function()
-						return get_obj("rbxassetid://" .. a.AssetId)
-					end)
-					if ok and res and res[1] and res[1]:IsA("Accessory") then
-						SafeWeldAccessory(res[1], char)
+			-- 2. Body Colors
+			local srcBc = app:FindFirstChildOfClass("BodyColors")
+			if srcBc then
+				local dstBc = char:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", char)
+				dstBc.HeadColor3 = srcBc.HeadColor3
+				dstBc.TorsoColor3 = srcBc.TorsoColor3
+				dstBc.LeftArmColor3 = srcBc.LeftArmColor3
+				dstBc.RightArmColor3 = srcBc.RightArmColor3
+				dstBc.LeftLegColor3 = srcBc.LeftLegColor3
+				dstBc.RightLegColor3 = srcBc.RightLegColor3
+				for _, p in ipairs(char:GetChildren()) do
+					if p:IsA("BasePart") then
+						if p.Name:find("Head") then p.Color = dstBc.HeadColor3
+						elseif p.Name:find("Torso") then p.Color = dstBc.TorsoColor3
+						elseif p.Name:find("Arm") or p.Name:find("Hand") then
+							p.Color = p.Name:find("Left") and dstBc.LeftArmColor3 or dstBc.RightArmColor3
+						elseif p.Name:find("Leg") or p.Name:find("Foot") then
+							p.Color = p.Name:find("Left") and dstBc.LeftLegColor3 or dstBc.RightLegColor3
+						end
 					end
-				end)
+				end
+			end
+
+			-- 3. Clothes
+			local s = app:FindFirstChildOfClass("Shirt")
+			if s then
+				local curS = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
+				curS.ShirtTemplate = s.ShirtTemplate
+			end
+			local p = app:FindFirstChildOfClass("Pants")
+			if p then
+				local curP = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
+				curP.PantsTemplate = p.PantsTemplate
+			end
+
+			-- 4. Face Decal
+			local head = char:FindFirstChild("Head")
+			if head then
+				local appHead = app:FindFirstChild("Head")
+				local srcFace = (appHead and appHead:FindFirstChild("face")) or app:FindFirstChild("face")
+				if srcFace and srcFace:IsA("Decal") then
+					local curFace = head:FindFirstChild("face") or Instance.new("Decal", head)
+					curFace.Name = "face"
+					curFace.Texture = srcFace.Texture
+				end
+			end
+
+			-- 5. Accessories
+			local accCount = 0
+			for _, item in ipairs(app:GetChildren()) do
+				if item:IsA("Accessory") then
+					local clone = item:Clone()
+					if SafeWeldAccessory(clone, char) then
+						accCount = accCount + 1
+					end
+				end
+			end
+
+			app:Destroy()
+			print(string.format("[NVL-Win] Decompiled avatar for %s: %d accessories equipped!", tostring(userQuery), accCount))
+			pcall(function()
+				Window:SendNotification({
+					Title = "Catalog Decompiler",
+					Description = string.format("Successfully applied avatar %s (%d accessories)", tostring(numId), accCount),
+					Duration = 3,
+				})
+			end)
+			return true
+		else
+			-- Fallback: HumanoidDescription
+			warn("[NVL-Win] GetCharacterAppearanceAsync failed, falling back to HumanoidDescription for ID:", numId)
+			local success, desc = pcall(function()
+				return Players:GetHumanoidDescriptionFromUserId(numId)
+			end)
+			if success and desc then
+				for _, item in ipairs(char:GetChildren()) do
+					if item:IsA("Accessory") then pcall(function() item:Destroy() end) end
+				end
+				if desc.Shirt and desc.Shirt > 0 then
+					local curS = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
+					curS.ShirtTemplate = "rbxassetid://" .. desc.Shirt
+				end
+				if desc.Pants and desc.Pants > 0 then
+					local curP = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
+					curP.PantsTemplate = "rbxassetid://" .. desc.Pants
+				end
+				local accList = {}
+				pcall(function() accList = desc:GetAccessories(true) end)
+				for _, a in ipairs(accList) do
+					if a.AssetId and a.AssetId > 0 and get_obj then
+						task.spawn(function()
+							local okRes, res = pcall(function() return get_obj("rbxassetid://" .. a.AssetId) end)
+							if okRes and res and res[1] and res[1]:IsA("Accessory") then
+								SafeWeldAccessory(res[1], char)
+							end
+						end)
+					end
+				end
+				return true
 			end
 		end
+		return false
+	end)
+end
 
-		print(string.format("[NVL-Win] Applied Universal Outfit for ID: %d (%s)", numId, tostring(userQuery)))
+-- METHOD 2.5: Decompile Individual Catalog Asset ID (Hat, Hair, Wings, Dominus, Clothes)
+local function DecompileCatalogAsset(assetQuery)
+	if not assetQuery or assetQuery == "" then return false end
+	local char = lp.Character
+	if not char or not char.Parent then return false end
+
+	local assetId = tonumber(string.match(tostring(assetQuery), "%d+"))
+	if not assetId then
+		warn("[NVL-Win] Invalid Catalog Asset ID:", assetQuery)
+		pcall(function()
+			Window:SendNotification({
+				Title = "Catalog Decompiler",
+				Description = "Invalid Asset ID: " .. tostring(assetQuery),
+				Duration = 3,
+			})
+		end)
+		return false
+	end
+
+	SnapshotOriginalAvatar()
+
+	task.spawn(function()
+		local ok, objs = pcall(function()
+			return game:GetObjects("rbxassetid://" .. assetId)
+		end)
+
+		if ok and objs and #objs > 0 then
+			local equippedCount = 0
+			for _, item in ipairs(objs) do
+				if item:IsA("Accessory") then
+					if SafeWeldAccessory(item, char) then
+						equippedCount = equippedCount + 1
+					end
+				elseif item:IsA("Shirt") then
+					local curS = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
+					curS.ShirtTemplate = item.ShirtTemplate
+					equippedCount = equippedCount + 1
+				elseif item:IsA("Pants") then
+					local curP = char:FindFirstChildOfClass("Pants") or Instance.new("Pants", char)
+					curP.PantsTemplate = item.PantsTemplate
+					equippedCount = equippedCount + 1
+				elseif item:IsA("Decal") then
+					local head = char:FindFirstChild("Head")
+					if head then
+						local curFace = head:FindFirstChild("face") or Instance.new("Decal", head)
+						curFace.Name = "face"
+						curFace.Texture = item.Texture
+						equippedCount = equippedCount + 1
+					end
+				elseif item:IsA("Model") or item:IsA("Folder") then
+					for _, sub in ipairs(item:GetDescendants()) do
+						if sub:IsA("Accessory") then
+							if SafeWeldAccessory(sub, char) then
+								equippedCount = equippedCount + 1
+							end
+						end
+					end
+				end
+			end
+			pcall(function()
+				Window:SendNotification({
+					Title = "Catalog Decompiler",
+					Description = string.format("Decompiled & equipped Catalog Item: %d (%d items)", assetId, equippedCount),
+					Duration = 3,
+				})
+			end)
+			print(string.format("[NVL-Win] Decompiled Catalog Asset ID %d successfully!", assetId))
+		else
+			warn("[NVL-Win] Failed to decompile Catalog Asset ID:", assetId)
+			pcall(function()
+				Window:SendNotification({
+					Title = "Catalog Decompiler",
+					Description = "Failed to load catalog item: " .. tostring(assetId),
+					Duration = 3,
+				})
+			end)
+		end
 	end)
 end
 
@@ -2779,49 +3071,138 @@ CardSelfEffects:CreateToggle({
 		VisualsState.SelfStepColor = c
 	end,
 })
+CardSelfEffects:CreateToggle({
+	Name = "Self Aura",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = VisualsState.SelfAuraColor,
+	Callback = function(v)
+		VisualsState.SelfAura = v
+		UpdateSelfAura()
+	end,
+	ColorCallback = function(c)
+		VisualsState.SelfAuraColor = c
+		UpdateSelfAura()
+	end,
+})
+CardSelfEffects:CreateDropdown({
+	Name = "Self Aura Effect",
+	Options = {
+		"None",
+		"Electric Sparks",
+		"Cosmic Stardust",
+		"Dark Flame",
+		"Cyber Matrix",
+		"Angelic Halo",
+		"Pulsing Ring",
+	},
+	Default = VisualsState.SelfAuraEffect or "Electric Sparks",
+	Callback = function(opt)
+		VisualsState.SelfAuraEffect = opt
+		UpdateSelfAura()
+	end,
+})
+CardSelfEffects:CreateSlider({
+	Name = "Self Aura Size",
+	Min = 1,
+	Max = 10,
+	Default = VisualsState.SelfAuraSize or 3,
+	Step = 0.5,
+	ResetValue = 3,
+	Callback = function(v)
+		VisualsState.SelfAuraSize = v
+		UpdateSelfAura()
+	end,
+})
 
 local CardModSkin = PlayersTab:CreateCard({
-	Title = "Custom Skin & Morph",
+	Title = "Catalog Decompiler & Avatar",
 	Side = "right",
 	Icon = MemoryAssets.Icons.users or "",
 	SubTab = "Self",
 })
+
+local SelectedSkinPreset = "10442891740"
+local CustomSkinUserQuery = ""
+local CustomSkinAssetQuery = ""
+
 CardModSkin:CreateDropdown({
 	Name = "Preset Outfits",
 	Options = {
 		"10442891740 - Kasumi AFK",
 		"1046787815 - Uninspired",
-		"10523593859 - Miru",
-		"10536288229 - Aiponn",
+		"10523593859 - Miru 552525",
+		"10536288229 - Aiponn 13",
 		"10639617194 - Chicken Comel",
-		"10708887824 - Mayuri Shark",
+		"10708887824 - Mayuri Cute Shark",
 		"10915292293 - Tuithichban Y2K",
-		"1103193770 - Tessy Korblox",
-		"3633336385 - Nicholas Rikka",
+		"1103193770 - Tessy Korblox Girl",
+		"3633336385 - Nicholas Cute Rikka",
+		"500490901 - Ruby Sometimes",
+		"2684599493 - Da Hood Trench Boy",
+		"151597600 - Kiyetso",
 	},
 	Default = "10442891740 - Kasumi AFK",
 	Callback = function(opt)
 		local extractedId = string.match(opt, "^(%d+)")
 		if extractedId then
-			SelectedSkinUserId = extractedId
+			SelectedSkinPreset = extractedId
+		end
+	end,
+})
+CardModSkin:CreateButton({
+	Name = "Apply Selected Preset",
+	Callback = function()
+		DecompileCatalogUser(SelectedSkinPreset)
+	end,
+})
+CardModSkin:CreateInput({
+	Placeholder = "Decompile User (Name or ID)",
+	Callback = function(text)
+		CustomSkinUserQuery = text
+	end,
+})
+CardModSkin:CreateButton({
+	Name = "Decompile & Apply User",
+	Callback = function()
+		if CustomSkinUserQuery and CustomSkinUserQuery ~= "" then
+			DecompileCatalogUser(CustomSkinUserQuery)
+		else
+			DecompileCatalogUser(SelectedSkinPreset)
 		end
 	end,
 })
 CardModSkin:CreateInput({
-	Placeholder = "Custom User ID (e.g. 10442891740)",
+	Placeholder = "Catalog Asset ID (e.g. 31101391)",
 	Callback = function(text)
-		CustomSkinUserId = text
+		CustomSkinAssetQuery = text
 	end,
 })
 CardModSkin:CreateButton({
-	Name = "Apply Selected Skin",
+	Name = "Decompile & Equip Item",
 	Callback = function()
-		local targetId = (CustomSkinUserId ~= "" and CustomSkinUserId) or SelectedSkinUserId
-		ApplySkinById(targetId)
+		if CustomSkinAssetQuery and CustomSkinAssetQuery ~= "" then
+			DecompileCatalogAsset(CustomSkinAssetQuery)
+		end
+	end,
+})
+CardModSkin:CreateToggle({
+	Name = "Headless Mode",
+	Default = false,
+	Callback = function(v)
+		SetHeadless(v)
+	end,
+})
+CardModSkin:CreateToggle({
+	Name = "Korblox Right Leg",
+	Default = false,
+	Callback = function(v)
+		SetKorbloxLeg(v)
 	end,
 })
 CardModSkin:CreateButton({
 	Name = "Reset Original Skin",
+	Danger = true,
 	Callback = function()
 		ResetOriginalSkin()
 	end,
