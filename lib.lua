@@ -1815,6 +1815,16 @@ function MemoryUI:CreateWindow(config)
 		MemoryUI.Connections = {}
 	end
 
+	pcall(function()
+		local old1 = CoreGui:FindFirstChild("NVL_Memory_UI")
+		if old1 then old1:Destroy() end
+		local rbxGui = CoreGui:FindFirstChild("RobloxGui")
+		if rbxGui then
+			local old2 = rbxGui:FindFirstChild("NVL_Memory_UI")
+			if old2 then old2:Destroy() end
+		end
+	end)
+
 	local ScreenGui = Create("ScreenGui", {
 		Name = "NVL_Memory_UI",
 		Parent = CoreGui,
@@ -3024,23 +3034,25 @@ function MemoryUI:CreateWindow(config)
 					Tween(ValueBoxStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
 				end)
 
-				-- Reset Button (with local asset icon to completely eliminate tofu glyph box [])
+				-- Reset Button: Sleek borderless action button (transparency = 1 by default, hover glow, 16x16 crisp vector icon)
 				local ResetBtn = Create("ImageButton", {
 					Name = "ResetBtn",
 					Parent = Row,
-					Size = UDim2.new(0, 22, 0, 22),
-					Position = UDim2.new(1, -30, 0.5, -11),
-					BackgroundColor3 = Color3.fromRGB(18, 20, 24),
+					Size = UDim2.new(0, 24, 0, 24),
+					Position = UDim2.new(1, -32, 0.5, -12),
+					BackgroundColor3 = Color3.fromRGB(24, 26, 34),
+					BackgroundTransparency = 1,
 					BorderSizePixel = 0,
 					Image = "",
 					AutoButtonColor = false,
 					ZIndex = 6,
 				})
-				Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = ResetBtn })
+				Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = ResetBtn })
 				local ResetStroke = Create("UIStroke", {
 					Parent = ResetBtn,
-					Color = Color3.fromRGB(30, 34, 42),
+					Color = Theme.Accent,
 					Thickness = 1,
+					Transparency = 1,
 				})
 				local resetAsset = (Assets.Icons and Assets.Icons.reset) or ""
 				if (not resetAsset or resetAsset == "") and _G.MemoryAssets and _G.MemoryAssets.Icons and _G.MemoryAssets.Icons.reset then
@@ -3057,25 +3069,25 @@ function MemoryUI:CreateWindow(config)
 				local ResetIcon = Create("ImageLabel", {
 					Name = "Icon",
 					Parent = ResetBtn,
-					Size = UDim2.new(0, 14, 0, 14),
-					Position = UDim2.new(0.5, -7, 0.5, -7),
+					Size = UDim2.new(0, 16, 0, 16),
+					Position = UDim2.new(0.5, -8, 0.5, -8),
 					BackgroundTransparency = 1,
 					Image = resetAsset or "",
-					ImageColor3 = Color3.fromRGB(165, 170, 190),
+					ImageColor3 = Color3.fromRGB(180, 185, 205),
 					ScaleType = Enum.ScaleType.Fit,
 					ZIndex = 7,
 				})
 
 				ResetBtn.MouseEnter:Connect(function()
-					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(26, 29, 38) })
-					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Theme.Accent })
-					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Theme.TextWhite })
+					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(28, 31, 42) })
+					Tween(ResetStroke, TweenInfo.new(0.18), { Transparency = 0, Color = Theme.Accent })
+					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Theme.Accent or Color3.fromRGB(255, 255, 255) })
 				end)
 
 				ResetBtn.MouseLeave:Connect(function()
-					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundColor3 = Color3.fromRGB(18, 20, 24) })
-					Tween(ResetStroke, TweenInfo.new(0.18), { Color = Color3.fromRGB(30, 34, 42) })
-					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Color3.fromRGB(140, 145, 160) })
+					Tween(ResetBtn, TweenInfo.new(0.18), { BackgroundTransparency = 1, BackgroundColor3 = Color3.fromRGB(24, 26, 34) })
+					Tween(ResetStroke, TweenInfo.new(0.18), { Transparency = 1, Color = Theme.Accent })
+					Tween(ResetIcon, TweenInfo.new(0.18), { ImageColor3 = Color3.fromRGB(180, 185, 205) })
 				end)
 
 				-- Snow Particle Effect
@@ -3172,8 +3184,9 @@ function MemoryUI:CreateWindow(config)
 
 					-- 360-degree smooth spin animation and color flash
 					ResetBtn.Rotation = 0
-					Tween(ResetBtn, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Rotation = -360 })
-					Tween(ResetStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(80, 220, 120) })
+					Tween(ResetBtn, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Rotation = -360, BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(20, 45, 30) })
+					Tween(ResetStroke, TweenInfo.new(0.15), { Transparency = 0, Color = Color3.fromRGB(80, 220, 120) })
+					Tween(ResetIcon, TweenInfo.new(0.15), { ImageColor3 = Color3.fromRGB(80, 220, 120) })
 
 					currentValue = originalVal
 					ValueInput.Text = string.format("%." .. decimals .. "f", currentValue)
@@ -3181,7 +3194,9 @@ function MemoryUI:CreateWindow(config)
 
 					task.delay(0.36, function()
 						ResetBtn.Rotation = 0
-						Tween(ResetStroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(30, 34, 42) })
+						Tween(ResetBtn, TweenInfo.new(0.2), { BackgroundTransparency = 1, BackgroundColor3 = Color3.fromRGB(24, 26, 34) })
+						Tween(ResetStroke, TweenInfo.new(0.2), { Transparency = 1, Color = Theme.Accent })
+						Tween(ResetIcon, TweenInfo.new(0.2), { ImageColor3 = Color3.fromRGB(180, 185, 205) })
 						isResetting = false
 					end)
 				end)

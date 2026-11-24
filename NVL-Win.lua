@@ -241,6 +241,14 @@ local CombatState = {
 	AutoReload = false,
 	LockedPlayer = nil,
 	LockedTargetPart = nil,
+
+	-- Anti-Desync Spatial Density Clustering Resolver (New UE Density Method)
+	Resolver = true,
+	ResolverMethod = "Spatial Density Cluster (UE)",
+	ResolverForgiveness = 14.4,
+	ResolverRefresh = 3.0,
+	ResolverVoidBonus = 5.0,
+	ResolverDistPenalty = 2.0,
 }
 getgenv().CombatState = CombatState
 
@@ -311,6 +319,86 @@ local function UpdateFOVCircle()
 		end
 	end
 end
+
+-- ========================================================================
+-- Anti-Desync Spatial Density Clustering Resolver (New Method: UE Density Centroid)
+-- ========================================================================
+local ResolverHistory = {}
+
+local function ResolveTargetPosition(targetInstance, rawPos)
+	if not CombatState.Resolver or not targetInstance or not rawPos then
+		return rawPos
+	end
+
+	local now = tick()
+	local hist = ResolverHistory[targetInstance]
+	if not hist or (now - hist.lastRefresh >= CombatState.ResolverRefresh) then
+		hist = {
+			samples = {},
+			lastRefresh = now,
+			resolvedPos = rawPos,
+		}
+		ResolverHistory[targetInstance] = hist
+	end
+
+	-- Dynamic forgiveness calculation (from ueresolver.txt)
+	local forgiveness = CombatState.ResolverForgiveness
+	local distFromOrigin = math.abs(rawPos.X) + math.abs(rawPos.Z)
+	if distFromOrigin < 8955 then
+		forgiveness = forgiveness + CombatState.ResolverVoidBonus
+	end
+
+	local localChar = lp.Character
+	local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
+	if localHrp then
+		local dist = (rawPos - localHrp.Position).Magnitude
+		local penalty = (dist / 100) * CombatState.ResolverDistPenalty
+		forgiveness = math.clamp(forgiveness - penalty, 1, 100)
+	end
+
+	-- Buffer samples (up to 50 samples for 0-latency density clustering)
+	table.insert(hist.samples, { pos = rawPos, time = now })
+	if #hist.samples > 50 then
+		table.remove(hist.samples, 1)
+	end
+
+	local samples = hist.samples
+	if #samples < 5 then
+		return rawPos
+	end
+
+	-- Spatial Density Clustering: Find highest density spatial centroid
+	local bestCount = 0
+	local bestCentroid = rawPos
+	local minCluster = 3
+
+	for i = 1, #samples do
+		local p1 = samples[i].pos
+		local clusterCount = 0
+		local clusterSum = Vector3.zero
+
+		for j = 1, #samples do
+			local p2 = samples[j].pos
+			if (p1 - p2).Magnitude <= forgiveness then
+				clusterCount = clusterCount + 1
+				clusterSum = clusterSum + p2
+			end
+		end
+
+		if clusterCount >= minCluster and clusterCount > bestCount then
+			bestCount = clusterCount
+			bestCentroid = clusterSum / clusterCount
+		end
+	end
+
+	if bestCount >= minCluster then
+		hist.resolvedPos = bestCentroid
+		return bestCentroid
+	end
+
+	return rawPos
+end
+getgenv().ResolveTargetPosition = ResolveTargetPosition
 
 -- Target Selection (New Method: Priority scoring + wall check)
 local function GetClosestTarget()
@@ -533,10 +621,12 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 		end
 	end
 
-	-- Sticky Aim / Target Lock (Smooth Camera Tracking)
+	-- Sticky Aim / Target Lock (Smooth Camera Tracking with Anti-Desync Resolver)
 	if CombatState.Enabled and CombatState.TargetLock and CurrentTargetPart and Camera then
 		local curCF = Camera.CFrame
-		local aimPos = CurrentTargetPart.Position
+		local rawAimPos = CurrentTargetPart.Position
+		local resolvedPos = ResolveTargetPosition(CurrentTarget, rawAimPos)
+		local aimPos = resolvedPos
 		if CombatState.Prediction and CombatState.Prediction > 0 and CurrentTargetPart.AssemblyLinearVelocity then
 			aimPos = aimPos + (CurrentTargetPart.AssemblyLinearVelocity * CombatState.Prediction)
 		end
@@ -548,7 +638,7 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 	ProcessTriggerbot()
 end)
 
--- Silent Aim Hooking (New Method: namecall interception)
+-- Silent Aim Hooking (New Method: namecall interception with Anti-Desync Resolver)
 pcall(function()
 	if hookmetamethod then
 		local oldNamecall
@@ -558,7 +648,9 @@ pcall(function()
 
 			if not checkcaller() and CombatState.Enabled and CombatState.SilentAim and CurrentTarget and CurrentTargetPart then
 				if math.random(1, 100) <= CombatState.Hitchance then
-					local predPos = CurrentTargetPart.Position + (CurrentTargetPart.Velocity * CombatState.Prediction)
+					local rawAimPos = CurrentTargetPart.Position
+					local resolvedPos = ResolveTargetPosition(CurrentTarget, rawAimPos)
+					local predPos = resolvedPos + (CurrentTargetPart.Velocity * CombatState.Prediction)
 
 					if method == "FireServer" and tostring(self) == "MainEvent" and args[1] == "UpdateMousePos" then
 						args[2] = predPos
@@ -1094,7 +1186,7 @@ CardAimbotAccLeft:CreateToggle({
 })
 
 local CardAimbotAccRight = AimbotTab:CreateCard({
-	Title = "Hitchance & Multipliers",
+	Title = "Anti-Desync Resolver & Prediction",
 	Side = "right",
 	Icon = MemoryAssets.Icons.target_fill or "",
 	SubTab = "Accuracy",
@@ -1107,6 +1199,64 @@ CardAimbotAccRight:CreateSlider({
 	Suffix = "%",
 	Callback = function(v)
 		CombatState.Hitchance = v
+	end,
+})
+CardAimbotAccRight:CreateToggle({
+	Name = "Anti-Desync Resolver",
+	Default = true,
+	Callback = function(v)
+		CombatState.Resolver = v
+	end,
+})
+CardAimbotAccRight:CreateDropdown({
+	Name = "Resolver Algorithm",
+	Options = { "Spatial Density Cluster (UE)", "Centroid Density", "Kalman Prediction" },
+	Default = "Spatial Density Cluster (UE)",
+	Callback = function(opt)
+		CombatState.ResolverMethod = opt
+	end,
+})
+CardAimbotAccRight:CreateSlider({
+	Name = "Resolver Forgiveness",
+	Min = 1,
+	Max = 30,
+	Default = 14.4,
+	Decimals = 1,
+	Suffix = " studs",
+	Callback = function(v)
+		CombatState.ResolverForgiveness = v
+	end,
+})
+CardAimbotAccRight:CreateSlider({
+	Name = "Resolver Refresh Period",
+	Min = 1,
+	Max = 10,
+	Default = 3,
+	Decimals = 1,
+	Suffix = "s",
+	Callback = function(v)
+		CombatState.ResolverRefresh = v
+	end,
+})
+CardAimbotAccRight:CreateSlider({
+	Name = "Out of Void Bonus",
+	Min = 0,
+	Max = 12,
+	Default = 5,
+	Decimals = 0,
+	Callback = function(v)
+		CombatState.ResolverVoidBonus = v
+	end,
+})
+CardAimbotAccRight:CreateSlider({
+	Name = "Distance Penalty",
+	Min = 0,
+	Max = 5,
+	Default = 2,
+	Decimals = 1,
+	Suffix = "x",
+	Callback = function(v)
+		CombatState.ResolverDistPenalty = v
 	end,
 })
 
@@ -3216,7 +3366,7 @@ CardViewmodel:CreateSlider({
 })
 
 -- ========================================================================
--- Exploits & Desync Engine (New Method - CFrame Manipulation, Ghost & Human Marker Viz)
+-- Exploits & Desync Engine (New Method - Non-Colliding Ghost, Aura & Textures)
 -- ========================================================================
 local DesyncState = {
 	Enabled = false,
@@ -3232,6 +3382,10 @@ local DesyncState = {
 	ShowIndicator = true,
 	IndicatorColor = Color3.fromRGB(255, 255, 255),
 	PulseEffect = false,
+	AuraEffect = "None",
+	AuraColor = Color3.fromRGB(186, 145, 252),
+	AuraSize = 3,
+	TextureStyle = "Clean Shaded",
 }
 getgenv().NVL_DesyncState = DesyncState
 
@@ -3239,11 +3393,25 @@ local GhostClone = nil
 local GhostMarkerGui = nil
 local GhostScreenIndicator = nil
 
+local lastAuraEffect = nil
+local lastAuraColor = nil
+local lastAuraSize = nil
+local lastTextureStyle = nil
+local lastVizMaterial = nil
+local lastVizColor = nil
+
 local function RemoveGhostClone()
 	if GhostClone and GhostClone.Parent then
 		GhostClone:Destroy()
 	end
 	GhostClone = nil
+
+	lastAuraEffect = nil
+	lastAuraColor = nil
+	lastAuraSize = nil
+	lastTextureStyle = nil
+	lastVizMaterial = nil
+	lastVizColor = nil
 
 	if GhostMarkerGui and GhostMarkerGui.Parent then
 		GhostMarkerGui:Destroy()
@@ -3284,6 +3452,138 @@ local function GetHumanMarkerAsset()
 	return a
 end
 
+local function ApplyGhostAura(ghostHrp)
+	if not ghostHrp then return end
+	local att = ghostHrp:FindFirstChild("GhostAuraAttachment")
+	if not att then
+		att = Instance.new("Attachment")
+		att.Name = "GhostAuraAttachment"
+		att.Position = Vector3.zero
+		att.Parent = ghostHrp
+	end
+
+	local emitter = att:FindFirstChild("AuraEmitter")
+	if DesyncState.AuraEffect == "None" then
+		if emitter then emitter:Destroy() end
+		return
+	end
+
+	if not emitter then
+		emitter = Instance.new("ParticleEmitter")
+		emitter.Name = "AuraEmitter"
+		emitter.Parent = att
+	end
+
+	local szMul = math.clamp(DesyncState.AuraSize / 3, 0.4, 3)
+	local auraCol = DesyncState.AuraColor
+
+	if DesyncState.AuraEffect == "Electric Sparks" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 35
+		emitter.Lifetime = NumberRange.new(0.3, 0.7)
+		emitter.Speed = NumberRange.new(4, 8)
+		emitter.SpreadAngle = Vector2.new(180, 180)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.4 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)})
+	elseif DesyncState.AuraEffect == "Cosmic Stardust" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 0.9
+		emitter.LightInfluence = 0
+		emitter.Rate = 25
+		emitter.Lifetime = NumberRange.new(1.0, 1.8)
+		emitter.Speed = NumberRange.new(0.5, 2.5)
+		emitter.SpreadAngle = Vector2.new(360, 360)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.5, 0.5 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 1)})
+	elseif DesyncState.AuraEffect == "Dark Flame" then
+		emitter.Texture = "rbxasset://textures/particles/fire_main.dds"
+		emitter.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, auraCol), ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 30))})
+		emitter.LightEmission = 0.7
+		emitter.LightInfluence = 0
+		emitter.Rate = 40
+		emitter.Lifetime = NumberRange.new(0.5, 1.0)
+		emitter.Speed = NumberRange.new(2, 5)
+		emitter.SpreadAngle = Vector2.new(45, 45)
+		emitter.Acceleration = Vector3.new(0, 6, 0)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6 * szMul), NumberSequenceKeypoint.new(1, 1.8 * szMul)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)})
+	elseif DesyncState.AuraEffect == "Cyber Matrix" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 45
+		emitter.Lifetime = NumberRange.new(0.4, 0.9)
+		emitter.Speed = NumberRange.new(5, 10)
+		emitter.SpreadAngle = Vector2.new(90, 90)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)})
+	elseif DesyncState.AuraEffect == "Angelic Halo" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 20
+		emitter.Lifetime = NumberRange.new(0.8, 1.4)
+		emitter.Speed = NumberRange.new(0.2, 0.8)
+		emitter.SpreadAngle = Vector2.new(20, 20)
+		emitter.Acceleration = Vector3.new(0, 3, 0)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2 * szMul), NumberSequenceKeypoint.new(0.5, 0.8 * szMul), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3), NumberSequenceKeypoint.new(1, 1)})
+	elseif DesyncState.AuraEffect == "Pulsing Ring" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 18
+		emitter.Lifetime = NumberRange.new(0.6, 1.2)
+		emitter.Speed = NumberRange.new(3, 7)
+		emitter.SpreadAngle = Vector2.new(180, 0)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3 * szMul), NumberSequenceKeypoint.new(1, 2.0 * szMul)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)})
+	end
+end
+
+local function ApplyGhostTextures(ghostModel)
+	if not ghostModel then return end
+	local style = DesyncState.TextureStyle
+	local col = DesyncState.VizColor
+	local matEnum = GetDesyncMaterialEnum(DesyncState.VizMaterial)
+
+	for _, item in ipairs(ghostModel:GetDescendants()) do
+		if item:IsA("BasePart") then
+			item.Color = col
+			if style == "Chrome" then
+				item.Material = Enum.Material.Metal
+				item.Reflectance = 0.85
+			elseif style == "Carbon Grid" or style == "Grid Matrix" then
+				item.Material = Enum.Material.DiamondPlate
+				item.Reflectance = 0.25
+			elseif style == "Hologram Scanlines" then
+				item.Material = Enum.Material.ForceField
+				item.Reflectance = 0.5
+			elseif style == "Galaxy Nebula" then
+				item.Material = Enum.Material.Glass
+				item.Reflectance = 0.9
+			elseif style == "Original Outfit" then
+				item.Material = Enum.Material.SmoothPlastic
+				item.Reflectance = 0
+			else -- "Clean Shaded"
+				item.Material = matEnum
+				item.Reflectance = 0
+			end
+		elseif item:IsA("Shirt") or item:IsA("Pants") or item:IsA("ShirtGraphic") then
+			if style ~= "Original Outfit" then
+				item:Destroy()
+			end
+		end
+	end
+end
+
 local function UpdateGhostClone(cframePos)
 	local char = lp.Character
 	if not char or not char:FindFirstChild("HumanoidRootPart") then
@@ -3309,13 +3609,19 @@ local function UpdateGhostClone(cframePos)
 		local isWireframe = (DesyncState.VizMaterial == "Wireframe")
 		local isGhost = (DesyncState.VizMaterial == "Ghost")
 
+		-- 100% Intangible Ghost Setup: Destroy Humanoid and physics hulls completely!
 		for _, item in ipairs(GhostClone:GetDescendants()) do
-			if item:IsA("Script") or item:IsA("LocalScript") or item:IsA("Sound") or item:IsA("Decal") then
+			if item:IsA("Humanoid") or item:IsA("Script") or item:IsA("LocalScript") or item:IsA("Sound") or item:IsA("TouchTransmitter") then
+				item:Destroy()
+			elseif item:IsA("Decal") and DesyncState.TextureStyle ~= "Original Outfit" then
 				item:Destroy()
 			elseif item:IsA("BasePart") then
 				item.CanCollide = false
+				item.CanTouch = false
+				item.CanQuery = false
+				item.Massless = true
+				item.Anchored = true -- Anchor ALL parts to eliminate physics collision & pushing completely
 				item.CastShadow = false
-				item.Anchored = false
 				item.Transparency = isWireframe and 1 or (isGhost and 0.8 or DesyncState.VizTransparency)
 				item.Material = matEnum
 				item.Color = DesyncState.VizColor
@@ -3323,9 +3629,6 @@ local function UpdateGhostClone(cframePos)
 		end
 
 		local ghostHrp = GhostClone:FindFirstChild("HumanoidRootPart")
-		if ghostHrp then
-			ghostHrp.Anchored = true
-		end
 
 		local hl = Instance.new("Highlight")
 		hl.Name = "GhostHL"
@@ -3390,13 +3693,34 @@ local function UpdateGhostClone(cframePos)
 			distLbl.Parent = bbg
 
 			GhostMarkerGui = bbg
+
+			-- Apply Aura
+			ApplyGhostAura(ghostHrp)
 		end
 
+		ApplyGhostTextures(GhostClone)
 		GhostClone.Parent = Workspace
 	end
 
+	-- Reactive Aura & Texture update on parameter change
+	local ghostHrp = GhostClone:FindFirstChild("HumanoidRootPart")
+	if ghostHrp then
+		if DesyncState.AuraEffect ~= lastAuraEffect or DesyncState.AuraColor ~= lastAuraColor or DesyncState.AuraSize ~= lastAuraSize then
+			lastAuraEffect = DesyncState.AuraEffect
+			lastAuraColor = DesyncState.AuraColor
+			lastAuraSize = DesyncState.AuraSize
+			ApplyGhostAura(ghostHrp)
+		end
+	end
+
+	if DesyncState.TextureStyle ~= lastTextureStyle or DesyncState.VizMaterial ~= lastVizMaterial or DesyncState.VizColor ~= lastVizColor then
+		lastTextureStyle = DesyncState.TextureStyle
+		lastVizMaterial = DesyncState.VizMaterial
+		lastVizColor = DesyncState.VizColor
+		ApplyGhostTextures(GhostClone)
+	end
+
 	-- Live property synchronization & pulse animation
-	local matEnum = GetDesyncMaterialEnum(DesyncState.VizMaterial)
 	local isWireframe = (DesyncState.VizMaterial == "Wireframe")
 	local isGhost = (DesyncState.VizMaterial == "Ghost")
 
@@ -3406,10 +3730,13 @@ local function UpdateGhostClone(cframePos)
 		effectiveTrans = math.clamp(effectiveTrans + pulseOffset, 0, 0.95)
 	end
 
+	-- Continuously enforce non-collision and visual parameters
 	for _, item in ipairs(GhostClone:GetDescendants()) do
 		if item:IsA("BasePart") then
+			if item.CanCollide ~= false then item.CanCollide = false end
+			if item.CanTouch ~= false then item.CanTouch = false end
+			if item.CanQuery ~= false then item.CanQuery = false end
 			if item.Color ~= DesyncState.VizColor then item.Color = DesyncState.VizColor end
-			if item.Material ~= matEnum then item.Material = matEnum end
 			if item.Transparency ~= effectiveTrans then item.Transparency = effectiveTrans end
 		elseif item:IsA("Highlight") then
 			if item.FillColor ~= DesyncState.VizColor then item.FillColor = DesyncState.VizColor end
@@ -3729,6 +4056,49 @@ CardDesyncViz:CreateSlider({
 	Decimals = 2,
 	Callback = function(v)
 		DesyncState.VizTransparency = v
+	end,
+})
+CardDesyncViz:CreateDropdown({
+	Name = "Texture Style",
+	Options = { "Clean Shaded", "Original Outfit", "Hologram Scanlines", "Grid Matrix", "Galaxy Nebula", "Chrome" },
+	Default = "Clean Shaded",
+	Callback = function(opt)
+		DesyncState.TextureStyle = opt
+		if GhostClone then ApplyGhostTextures(GhostClone) end
+	end,
+})
+CardDesyncViz:CreateDropdown({
+	Name = "Aura Effect",
+	Options = { "None", "Electric Sparks", "Cosmic Stardust", "Dark Flame", "Cyber Matrix", "Angelic Halo", "Pulsing Ring" },
+	Default = "None",
+	Callback = function(opt)
+		DesyncState.AuraEffect = opt
+		local ghostHrp = GhostClone and GhostClone:FindFirstChild("HumanoidRootPart")
+		if ghostHrp then ApplyGhostAura(ghostHrp) end
+	end,
+})
+CardDesyncViz:CreateToggle({
+	Name = "Aura Color",
+	Default = true,
+	ColorBadge = true,
+	ColorValue = DesyncState.AuraColor,
+	Callback = function(v) end,
+	ColorCallback = function(c)
+		DesyncState.AuraColor = c
+		local ghostHrp = GhostClone and GhostClone:FindFirstChild("HumanoidRootPart")
+		if ghostHrp then ApplyGhostAura(ghostHrp) end
+	end,
+})
+CardDesyncViz:CreateSlider({
+	Name = "Aura Size",
+	Min = 1,
+	Max = 10,
+	Default = 3,
+	Decimals = 0,
+	Callback = function(v)
+		DesyncState.AuraSize = v
+		local ghostHrp = GhostClone and GhostClone:FindFirstChild("HumanoidRootPart")
+		if ghostHrp then ApplyGhostAura(ghostHrp) end
 	end,
 })
 CardDesyncViz:CreateToggle({
