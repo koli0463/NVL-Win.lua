@@ -553,7 +553,7 @@ getgenv().GetClosestTarget = GetClosestTarget
 -- Triggerbot Engine (New Method - Raycast Target Interception)
 local lastTriggerShot = 0
 local function ProcessTriggerbot()
-	if not CombatState.Enabled or not CombatState.Triggerbot then return end
+	if not CombatState.Triggerbot then return end
 	local now = tick()
 	if (now - lastTriggerShot) < (CombatState.TriggerbotDelay / 1000) then return end
 
@@ -582,6 +582,63 @@ local function ProcessTriggerbot()
 					tool:Activate()
 				elseif mouse1click then
 					mouse1click()
+				end
+			end
+		end
+	end
+end
+
+-- Fast Tool Cooldown & Weapon Handling Engine
+local lastReloadAttempt = 0
+local function ProcessWeaponHandling()
+	local char = lp.Character
+	if not char then return end
+	local tool = char:FindFirstChildOfClass("Tool")
+	if not tool then return end
+
+	-- Fast Tool Cooldown (bypass tool debounce, reset Tool.Enabled)
+	if CombatState.FastCooldown then
+		if not tool.Enabled then
+			tool.Enabled = true
+		end
+		for _, name in ipairs({ "Cooldown", "cooldown", "Debounce", "debounce", "Delay", "delay", "FireRate", "firerate" }) do
+			local val = tool:FindFirstChild(name)
+			if val and val:IsA("NumberValue") and val.Value > 0.05 then
+				val.Value = 0.01
+			end
+			local attr = tool:GetAttribute(name)
+			if type(attr) == "number" and attr > 0.05 then
+				tool:SetAttribute(name, 0.01)
+			end
+		end
+	end
+
+	-- Auto Reload (detect empty clip / zero ammo and press R or fire reload remote)
+	if CombatState.AutoReload then
+		local now = tick()
+		if now - lastReloadAttempt > 1.0 then
+			local needsReload = false
+			for _, name in ipairs({ "Ammo", "ammo", "Clip", "clip", "CurrentAmmo", "Bullets", "Mag" }) do
+				local val = tool:FindFirstChild(name)
+				if val and (val:IsA("IntValue") or val:IsA("NumberValue")) and val.Value <= 0 then
+					needsReload = true
+					break
+				end
+				local attr = tool:GetAttribute(name)
+				if type(attr) == "number" and attr <= 0 then
+					needsReload = true
+					break
+				end
+			end
+
+			if needsReload then
+				lastReloadAttempt = now
+				local reloadRemote = tool:FindFirstChild("Reload") or tool:FindFirstChild("ReloadEvent")
+				if reloadRemote and reloadRemote:IsA("RemoteEvent") then
+					pcall(function() reloadRemote:FireServer() end)
+				elseif keypress and keyrelease then
+					keypress(0x52) -- KeyCode R
+					task.delay(0.05, function() keyrelease(0x52) end)
 				end
 			end
 		end
@@ -634,8 +691,9 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 		Camera.CFrame = curCF:Lerp(targetCF, math.clamp(CombatState.TargetLockSmoothness, 0.05, 1))
 	end
 
-	-- Triggerbot
+	-- Triggerbot & Weapon Handling
 	ProcessTriggerbot()
+	ProcessWeaponHandling()
 end)
 
 -- Silent Aim Hooking (New Method: namecall interception with Anti-Desync Resolver)
@@ -2256,17 +2314,69 @@ end
 local function SnapshotOriginalAvatar()
 	if OriginalAvatarState or not lp.Character then return end
 	local char = lp.Character
+	local hum = char:FindFirstChildOfClass("Humanoid")
 	local bc = char:FindFirstChildOfClass("BodyColors")
 	local shirt = char:FindFirstChildOfClass("Shirt")
 	local pants = char:FindFirstChildOfClass("Pants")
 	local head = char:FindFirstChild("Head")
 	local face = head and head:FindFirstChild("face")
+	local animateScript = char:FindFirstChild("Animate")
+
 	local origAccs = {}
 	for _, acc in ipairs(char:GetChildren()) do
 		if acc:IsA("Accessory") then
 			table.insert(origAccs, acc:Clone())
 		end
 	end
+
+	-- Snapshot Scales
+	local origScales = {}
+	if hum then
+		for _, sName in ipairs({"BodyHeightScale", "BodyWidthScale", "BodyDepthScale", "HeadScale", "BodyTypeScale", "BodyProportionScale"}) do
+			local sv = hum:FindFirstChild(sName)
+			if sv and sv:IsA("NumberValue") then
+				origScales[sName] = sv.Value
+			end
+		end
+	end
+
+	-- Snapshot Animations
+	local origAnims = {}
+	if animateScript then
+		for _, slot in ipairs(animateScript:GetChildren()) do
+			if slot:IsA("StringValue") or slot:IsA("Folder") then
+				local list = {}
+				for _, anim in ipairs(slot:GetChildren()) do
+					if anim:IsA("Animation") and anim.AnimationId ~= "" then
+						list[anim.Name] = anim.AnimationId
+					end
+				end
+				origAnims[slot.Name] = list
+			end
+		end
+	end
+
+	-- Snapshot Limbs
+	local origLimbs = {}
+	for _, p in ipairs(char:GetChildren()) do
+		if p:IsA("MeshPart") then
+			local attMap = {}
+			for _, att in ipairs(p:GetChildren()) do
+				if att:IsA("Attachment") then
+					attMap[att.Name] = att.CFrame
+				end
+			end
+			origLimbs[p.Name] = {
+				MeshId = p.MeshId,
+				TextureID = p.TextureID,
+				Size = p.Size,
+				Transparency = p.Transparency,
+				Attachments = attMap,
+				MeshClone = p:Clone(),
+			}
+		end
+	end
+
 	OriginalAvatarState = {
 		HeadColor = bc and bc.HeadColor3,
 		TorsoColor = bc and bc.TorsoColor3,
@@ -2278,6 +2388,11 @@ local function SnapshotOriginalAvatar()
 		Pants = pants and pants.PantsTemplate or "",
 		FaceTexture = face and face.Texture or "rbxasset://textures/face.png",
 		Accessories = origAccs,
+		Scales = origScales,
+		Animations = origAnims,
+		Limbs = origLimbs,
+		HeadMeshId = head and head:IsA("MeshPart") and head.MeshId or (head and head:FindFirstChildOfClass("SpecialMesh") and head:FindFirstChildOfClass("SpecialMesh").MeshId),
+		HeadTextureId = head and head:IsA("MeshPart") and head.TextureID or (head and head:FindFirstChildOfClass("SpecialMesh") and head:FindFirstChildOfClass("SpecialMesh").TextureId),
 	}
 end
 
@@ -2401,11 +2516,14 @@ local function CopyOutfitFromPlayer(targetPlayerName)
 	print(string.format("[NVL-Win] Cloned outfit from server player: %s", targetPlayerName))
 end
 
--- METHOD 2: Catalog Decompiler Engine (Decompile Full User Avatar via Roblox Web API)
-local function DecompileCatalogUser(userQuery)
+-- METHOD 2: Full Body & Animation Avatar Engine (Reverse-Engineered 7D Pipeline)
+local function ApplyCustomCharacter(userQuery)
 	if not userQuery or userQuery == "" then return false end
 	local char = lp.Character
 	if not char or not char.Parent then return false end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	local animateScript = char:FindFirstChild("Animate")
 
 	task.spawn(function()
 		local numId = tonumber(userQuery)
@@ -2419,7 +2537,7 @@ local function DecompileCatalogUser(userQuery)
 				warn("[NVL-Win] Could not resolve username:", userQuery)
 				pcall(function()
 					Window:SendNotification({
-						Title = "Catalog Decompiler",
+						Title = "Custom Character",
 						Description = "Could not resolve username: " .. tostring(userQuery),
 						Duration = 3,
 					})
@@ -2442,7 +2560,74 @@ local function DecompileCatalogUser(userQuery)
 				end
 			end
 
-			-- 2. Body Colors
+			-- 2. Full Body Scales (Height, Width, Depth, Head, Proportion, BodyType)
+			local scaleCount = 0
+			if hum then
+				for _, child in ipairs(app:GetChildren()) do
+					if child:IsA("NumberValue") then
+						local targetVal = hum:FindFirstChild(child.Name)
+						if targetVal and targetVal:IsA("NumberValue") then
+							targetVal.Value = child.Value
+							scaleCount = scaleCount + 1
+						end
+					end
+				end
+			end
+
+			-- 3. Full Body Limbs (ApplyMesh + Geometry + RigAttachments from R15ArtistIntent / R15Fixed)
+			local limbCount = 0
+			local limbFolder = app:FindFirstChild("R15ArtistIntent") or app:FindFirstChild("R15Fixed")
+			if limbFolder then
+				for _, part in ipairs(limbFolder:GetChildren()) do
+					if part:IsA("MeshPart") then
+						local charPart = char:FindFirstChild(part.Name)
+						if charPart and charPart:IsA("MeshPart") then
+							pcall(function() charPart:ApplyMesh(part) end)
+							pcall(function() charPart.MeshId = part.MeshId end)
+							pcall(function() charPart.TextureID = part.TextureID or "" end)
+							limbCount = limbCount + 1
+						end
+					end
+				end
+			end
+
+			-- 4. Full Animation Pack (Locomotion Engine: idle, walk, run, jump, fall, climb, swim, pose)
+			local animCount = 0
+			if animateScript then
+				for _, folder in ipairs(app:GetChildren()) do
+					if folder.Name == "R15Anim" then
+						for _, slot in ipairs(folder:GetChildren()) do
+							local charSlot = animateScript:FindFirstChild(slot.Name)
+							if charSlot then
+								for _, anim in ipairs(slot:GetChildren()) do
+									if anim:IsA("Animation") and anim.AnimationId ~= "" then
+										local charAnim = charSlot:FindFirstChild(anim.Name)
+										if charAnim and charAnim:IsA("Animation") then
+											charAnim.AnimationId = anim.AnimationId
+											animCount = animCount + 1
+										else
+											local newAnim = Instance.new("Animation")
+											newAnim.Name = anim.Name
+											newAnim.AnimationId = anim.AnimationId
+											newAnim.Parent = charSlot
+											animCount = animCount + 1
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+
+				-- Reload animator tracks so new animations play immediately
+				if animator then
+					for _, trk in ipairs(animator:GetPlayingAnimationTracks()) do
+						pcall(function() trk:Stop(0.1) end)
+					end
+				end
+			end
+
+			-- 5. Body Colors & Limbs Tinting
 			local srcBc = app:FindFirstChildOfClass("BodyColors")
 			if srcBc then
 				local dstBc = char:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", char)
@@ -2465,7 +2650,7 @@ local function DecompileCatalogUser(userQuery)
 				end
 			end
 
-			-- 3. Clothes
+			-- 6. Clothes
 			local s = app:FindFirstChildOfClass("Shirt")
 			if s then
 				local curS = char:FindFirstChildOfClass("Shirt") or Instance.new("Shirt", char)
@@ -2477,7 +2662,7 @@ local function DecompileCatalogUser(userQuery)
 				curP.PantsTemplate = p.PantsTemplate
 			end
 
-			-- 4. Face Decal
+			-- 7. Face Decal
 			local head = char:FindFirstChild("Head")
 			if head then
 				local appHead = app:FindFirstChild("Head")
@@ -2489,7 +2674,7 @@ local function DecompileCatalogUser(userQuery)
 				end
 			end
 
-			-- 5. Accessories
+			-- 8. Accessories
 			local accCount = 0
 			for _, item in ipairs(app:GetChildren()) do
 				if item:IsA("Accessory") then
@@ -2501,17 +2686,17 @@ local function DecompileCatalogUser(userQuery)
 			end
 
 			app:Destroy()
-			print(string.format("[NVL-Win] Decompiled avatar for %s: %d accessories equipped!", tostring(userQuery), accCount))
+			print(string.format("[NVL-Win] Applied Full Avatar for %s: %d accs, %d limbs, %d anims, %d scales!", tostring(userQuery), accCount, limbCount, animCount, scaleCount))
 			pcall(function()
 				Window:SendNotification({
-					Title = "Catalog Decompiler",
-					Description = string.format("Successfully applied avatar %s (%d accessories)", tostring(numId), accCount),
+					Title = "Custom Character",
+					Description = string.format("Applied full avatar %s (%d accs, %d anims)", tostring(numId), accCount, animCount),
 					Duration = 3,
 				})
 			end)
 			return true
 		else
-			-- Fallback: HumanoidDescription
+			-- Fallback: HumanoidDescription for asset IDs
 			warn("[NVL-Win] GetCharacterAppearanceAsync failed, falling back to HumanoidDescription for ID:", numId)
 			local success, desc = pcall(function()
 				return Players:GetHumanoidDescriptionFromUserId(numId)
@@ -2540,15 +2725,25 @@ local function DecompileCatalogUser(userQuery)
 						end)
 					end
 				end
+				pcall(function()
+					Window:SendNotification({
+						Title = "Custom Character",
+						Description = string.format("Applied character outfit: %s", tostring(numId)),
+						Duration = 3,
+					})
+				end)
 				return true
 			end
 		end
 		return false
 	end)
 end
+local DecompileCatalogUser = ApplyCustomCharacter
+getgenv().ApplyCustomCharacter = ApplyCustomCharacter
+getgenv().ApplyCatalogItem = ApplyCatalogItem
 
--- METHOD 2.5: Decompile Individual Catalog Asset ID (Hat, Hair, Wings, Dominus, Clothes)
-local function DecompileCatalogAsset(assetQuery)
+-- METHOD 2.5: Load Individual Catalog Asset Item (Hat, Hair, Wings, Dominus, Clothes)
+local function ApplyCatalogItem(assetQuery)
 	if not assetQuery or assetQuery == "" then return false end
 	local char = lp.Character
 	if not char or not char.Parent then return false end
@@ -2558,7 +2753,7 @@ local function DecompileCatalogAsset(assetQuery)
 		warn("[NVL-Win] Invalid Catalog Asset ID:", assetQuery)
 		pcall(function()
 			Window:SendNotification({
-				Title = "Catalog Decompiler",
+				Title = "Custom Character",
 				Description = "Invalid Asset ID: " .. tostring(assetQuery),
 				Duration = 3,
 			})
@@ -2608,24 +2803,25 @@ local function DecompileCatalogAsset(assetQuery)
 			end
 			pcall(function()
 				Window:SendNotification({
-					Title = "Catalog Decompiler",
-					Description = string.format("Decompiled & equipped Catalog Item: %d (%d items)", assetId, equippedCount),
+					Title = "Custom Character",
+					Description = string.format("Equipped item: %d (%d items)", assetId, equippedCount),
 					Duration = 3,
 				})
 			end)
-			print(string.format("[NVL-Win] Decompiled Catalog Asset ID %d successfully!", assetId))
+			print(string.format("[NVL-Win] Equipped Catalog Asset ID %d successfully!", assetId))
 		else
-			warn("[NVL-Win] Failed to decompile Catalog Asset ID:", assetId)
+			warn("[NVL-Win] Failed to load Catalog Asset ID:", assetId)
 			pcall(function()
 				Window:SendNotification({
-					Title = "Catalog Decompiler",
-					Description = "Failed to load catalog item: " .. tostring(assetId),
+					Title = "Custom Character",
+					Description = "Failed to load item: " .. tostring(assetId),
 					Duration = 3,
 				})
 			end)
 		end
 	end)
 end
+local DecompileCatalogAsset = ApplyCatalogItem
 
 -- METHOD 3: Headless Mode (Reversible, 0 camera break)
 local function SetHeadless(enabled)
@@ -2705,10 +2901,66 @@ local function SetBodyMaterial(matName, tintColor)
 	end
 end
 
--- METHOD 6: Reset Original Skin
+-- METHOD 6: Reset Original Skin (Full Reversion: Scales, Limbs, Anims, Clothes, Colors)
 local function ResetOriginalSkin()
 	local char = lp.Character
 	if not char or not OriginalAvatarState then return end
+
+	-- Restore Body Scales
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum and OriginalAvatarState.Scales then
+		for scaleName, val in pairs(OriginalAvatarState.Scales) do
+			local scaleObj = hum:FindFirstChild(scaleName)
+			if scaleObj and scaleObj:IsA("NumberValue") then
+				scaleObj.Value = val
+			end
+		end
+	end
+
+	-- Restore Limbs Mesh Geometry
+	if OriginalAvatarState.Limbs then
+		for partName, limbData in pairs(OriginalAvatarState.Limbs) do
+			local part = char:FindFirstChild(partName)
+			if part and part:IsA("MeshPart") then
+				if limbData.MeshId and limbData.MeshId ~= "" then
+					pcall(function() part.MeshId = limbData.MeshId end)
+				end
+				if limbData.TextureID then
+					pcall(function() part.TextureID = limbData.TextureID end)
+				end
+				if limbData.Size then
+					pcall(function() part.Size = limbData.Size end)
+				end
+				if limbData.Transparency then
+					pcall(function() part.Transparency = limbData.Transparency end)
+				end
+			end
+		end
+	end
+
+	-- Restore Animation Pack
+	local animate = char:FindFirstChild("Animate")
+	if animate and OriginalAvatarState.Animations then
+		for slotName, animMap in pairs(OriginalAvatarState.Animations) do
+			local slotFolder = animate:FindFirstChild(slotName)
+			if slotFolder then
+				for animName, animId in pairs(animMap) do
+					local animObj = slotFolder:FindFirstChild(animName)
+					if animObj and animObj:IsA("Animation") then
+						animObj.AnimationId = animId
+					end
+				end
+			end
+		end
+		if hum then
+			local animator = hum:FindFirstChildOfClass("Animator")
+			if animator then
+				for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+					pcall(function() track:Stop(0.1) end)
+				end
+			end
+		end
+	end
 
 	-- Remove custom accessories
 	for _, item in ipairs(char:GetChildren()) do
@@ -2752,6 +3004,21 @@ local function ResetOriginalSkin()
 		end
 	end
 
+	-- Restore Face Decal
+	local head = char:FindFirstChild("Head")
+	if head then
+		local face = head:FindFirstChild("face")
+		if face and face:IsA("Decal") then
+			face.Texture = OriginalAvatarState.FaceTexture or ""
+			face.Transparency = 0
+		elseif OriginalAvatarState.FaceTexture and OriginalAvatarState.FaceTexture ~= "" then
+			local newFace = Instance.new("Decal")
+			newFace.Name = "face"
+			newFace.Texture = OriginalAvatarState.FaceTexture
+			newFace.Parent = head
+		end
+	end
+
 	-- Restore Headless & Korblox
 	SetHeadless(false)
 	SetKorbloxLeg(false)
@@ -2764,8 +3031,16 @@ local function ResetOriginalSkin()
 		end
 	end
 
-	print("[NVL-Win] Reset to Original Avatar Skin.")
+	pcall(function()
+		Window:SendNotification({
+			Title = "Custom Character",
+			Description = "Reset to original avatar appearance & animations.",
+			Duration = 3,
+		})
+	end)
+	print("[NVL-Win] Reset to Original Avatar Skin & Animations successfully.")
 end
+getgenv().ResetOriginalSkin = ResetOriginalSkin
 
 -- Left Column: Card 1 - ESP Main
 local VisualsMainCard = PlayersTab:CreateCard({
@@ -3116,7 +3391,7 @@ CardSelfEffects:CreateSlider({
 })
 
 local CardModSkin = PlayersTab:CreateCard({
-	Title = "Catalog Decompiler & Avatar",
+	Title = "Custom Character & Avatar",
 	Side = "right",
 	Icon = MemoryAssets.Icons.users or "",
 	SubTab = "Self",
@@ -3127,22 +3402,18 @@ local CustomSkinUserQuery = ""
 local CustomSkinAssetQuery = ""
 
 CardModSkin:CreateDropdown({
-	Name = "Preset Outfits",
+	Name = "Featured Avatar Profiles",
 	Options = {
-		"10442891740 - Kasumi AFK",
-		"1046787815 - Uninspired",
-		"10523593859 - Miru 552525",
-		"10536288229 - Aiponn 13",
-		"10639617194 - Chicken Comel",
-		"10708887824 - Mayuri Cute Shark",
-		"10915292293 - Tuithichban Y2K",
-		"1103193770 - Tessy Korblox Girl",
-		"3633336385 - Nicholas Cute Rikka",
-		"500490901 - Ruby Sometimes",
-		"2684599493 - Da Hood Trench Boy",
-		"151597600 - Kiyetso",
+		"10442891740 - Cyber Neon",
+		"10536288229 - Minimalist Dark",
+		"10708887824 - Street Aesthetic",
+		"1103193770 - Stealth Korblox",
+		"2684599493 - Tactical Hoodie",
+		"1046787815 - Retro Casual",
+		"10639617194 - Comel Pastel",
+		"10915292293 - Modern Y2K",
 	},
-	Default = "10442891740 - Kasumi AFK",
+	Default = "10442891740 - Cyber Neon",
 	Callback = function(opt)
 		local extractedId = string.match(opt, "^(%d+)")
 		if extractedId then
@@ -3151,38 +3422,38 @@ CardModSkin:CreateDropdown({
 	end,
 })
 CardModSkin:CreateButton({
-	Name = "Apply Selected Preset",
+	Name = "Apply Selected Profile",
 	Callback = function()
-		DecompileCatalogUser(SelectedSkinPreset)
+		ApplyCustomCharacter(SelectedSkinPreset)
 	end,
 })
 CardModSkin:CreateInput({
-	Placeholder = "Decompile User (Name or ID)",
+	Placeholder = "Custom User (Username or User ID)",
 	Callback = function(text)
 		CustomSkinUserQuery = text
 	end,
 })
 CardModSkin:CreateButton({
-	Name = "Decompile & Apply User",
+	Name = "Apply Custom Character",
 	Callback = function()
 		if CustomSkinUserQuery and CustomSkinUserQuery ~= "" then
-			DecompileCatalogUser(CustomSkinUserQuery)
+			ApplyCustomCharacter(CustomSkinUserQuery)
 		else
-			DecompileCatalogUser(SelectedSkinPreset)
+			ApplyCustomCharacter(SelectedSkinPreset)
 		end
 	end,
 })
 CardModSkin:CreateInput({
-	Placeholder = "Catalog Asset ID (e.g. 31101391)",
+	Placeholder = "Catalog Item ID (e.g. 31101391)",
 	Callback = function(text)
 		CustomSkinAssetQuery = text
 	end,
 })
 CardModSkin:CreateButton({
-	Name = "Decompile & Equip Item",
+	Name = "Equip Catalog Item",
 	Callback = function()
 		if CustomSkinAssetQuery and CustomSkinAssetQuery ~= "" then
-			DecompileCatalogAsset(CustomSkinAssetQuery)
+			ApplyCatalogItem(CustomSkinAssetQuery)
 		end
 	end,
 })
@@ -3990,9 +4261,9 @@ local function UpdateGhostClone(cframePos)
 		local isWireframe = (DesyncState.VizMaterial == "Wireframe")
 		local isGhost = (DesyncState.VizMaterial == "Ghost")
 
-		-- 100% Intangible Ghost Setup: Destroy Humanoid and physics hulls completely!
+		-- 100% Intangible Ghost Setup: Destroy Humanoid, joints, and physics hulls completely!
 		for _, item in ipairs(GhostClone:GetDescendants()) do
-			if item:IsA("Humanoid") or item:IsA("Script") or item:IsA("LocalScript") or item:IsA("Sound") or item:IsA("TouchTransmitter") then
+			if item:IsA("Humanoid") or item:IsA("Script") or item:IsA("LocalScript") or item:IsA("Sound") or item:IsA("TouchTransmitter") or item:IsA("JointInstance") or item:IsA("WeldConstraint") then
 				item:Destroy()
 			elseif item:IsA("Decal") and DesyncState.TextureStyle ~= "Original Outfit" then
 				item:Destroy()
@@ -4003,11 +4274,25 @@ local function UpdateGhostClone(cframePos)
 				item.Massless = true
 				item.Anchored = true -- Anchor ALL parts to eliminate physics collision & pushing completely
 				item.CastShadow = false
+				pcall(function() item.CustomPhysicalProperties = PhysicalProperties.new(0.001, 0, 0, 0, 0) end)
 				item.Transparency = isWireframe and 1 or (isGhost and 0.8 or DesyncState.VizTransparency)
 				item.Material = matEnum
 				item.Color = DesyncState.VizColor
 			end
 		end
+
+		GhostClone.DescendantAdded:Connect(function(item)
+			if item:IsA("BasePart") then
+				item.CanCollide = false
+				item.CanTouch = false
+				item.CanQuery = false
+				item.Massless = true
+				item.Anchored = true
+				pcall(function() item.CustomPhysicalProperties = PhysicalProperties.new(0.001, 0, 0, 0, 0) end)
+			elseif item:IsA("JointInstance") or item:IsA("WeldConstraint") or item:IsA("Humanoid") or item:IsA("TouchTransmitter") then
+				pcall(function() item:Destroy() end)
+			end
+		end)
 
 		local ghostHrp = GhostClone:FindFirstChild("HumanoidRootPart")
 
@@ -4217,13 +4502,20 @@ local function UpdateGhostClone(cframePos)
 	GhostClone:PivotTo(cframePos)
 end
 
+local frozenDesyncCFrame = nil
+local lastFreezeParams = nil
+
 NVL_Connect(lp.CharacterAdded, function()
 	RemoveGhostClone()
+	frozenDesyncCFrame = nil
+	lastFreezeParams = nil
 end)
 
 NVL_Connect(RunService.Heartbeat, function()
 	if not DesyncState.Enabled then
 		RemoveGhostClone()
+		frozenDesyncCFrame = nil
+		lastFreezeParams = nil
 		return
 	end
 
@@ -4231,25 +4523,34 @@ NVL_Connect(RunService.Heartbeat, function()
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
 
-	local offset = Vector3.zero
-	if DesyncState.Mode == "Jitter" then
-		local tickSign = (math.floor(tick() * 15) % 2 == 0) and 1 or -1
-		offset = Vector3.new(tickSign * DesyncState.RandomAmount, 0, -tickSign * DesyncState.RandomAmount)
-	elseif DesyncState.Mode == "Freeze" then
-		offset = Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
-	elseif DesyncState.Mode == "Custom" then
-		offset = Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
-	elseif DesyncState.Mode == "Underground" then
-		offset = Vector3.new(0, -12, 0)
-	elseif DesyncState.Mode == "Void" then
-		offset = Vector3.new(math.random(-5000, 5000), -500, math.random(-5000, 5000))
-	elseif DesyncState.Mode == "Random" then
-		offset = Vector3.new(math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount), 0, math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount))
-	elseif DesyncState.Mode == "Safe Shoot" then
-		offset = Vector3.new(math.random(-3, 3), -5, math.random(-3, 3))
+	local desyncCF
+	if DesyncState.Mode == "Freeze" then
+		local curParams = string.format("%.2f,%.2f,%.2f", DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
+		if not frozenDesyncCFrame or curParams ~= lastFreezeParams then
+			lastFreezeParams = curParams
+			frozenDesyncCFrame = hrp.CFrame + Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
+		end
+		desyncCF = frozenDesyncCFrame
+	else
+		frozenDesyncCFrame = nil
+		lastFreezeParams = nil
+		local offset = Vector3.zero
+		if DesyncState.Mode == "Jitter" then
+			local tickSign = (math.floor(tick() * 15) % 2 == 0) and 1 or -1
+			offset = Vector3.new(tickSign * DesyncState.RandomAmount, 0, -tickSign * DesyncState.RandomAmount)
+		elseif DesyncState.Mode == "Custom" then
+			offset = Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
+		elseif DesyncState.Mode == "Underground" then
+			offset = Vector3.new(0, -12, 0)
+		elseif DesyncState.Mode == "Void" then
+			offset = Vector3.new(math.random(-5000, 5000), -500, math.random(-5000, 5000))
+		elseif DesyncState.Mode == "Random" then
+			offset = Vector3.new(math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount), 0, math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount))
+		elseif DesyncState.Mode == "Safe Shoot" then
+			offset = Vector3.new(math.random(-3, 3), -5, math.random(-3, 3))
+		end
+		desyncCF = hrp.CFrame + offset
 	end
-
-	local desyncCF = hrp.CFrame + offset
 
 	if DesyncState.Visualize then
 		UpdateGhostClone(desyncCF)
@@ -4399,6 +4700,22 @@ CardDesync:CreateSlider({
 	Decimals = 0,
 	Callback = function(v)
 		DesyncState.RandomAmount = v
+	end,
+})
+CardDesync:CreateButton({
+	Name = "Re-Freeze Current Position",
+	Callback = function()
+		local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			frozenDesyncCFrame = hrp.CFrame + Vector3.new(DesyncState.CustomX, DesyncState.CustomY, DesyncState.CustomZ)
+			pcall(function()
+				Window:SendNotification({
+					Title = "Desync Anti-Aim",
+					Description = "Freeze coordinates updated to current position.",
+					Duration = 2,
+				})
+			end)
+		end
 	end,
 })
 
