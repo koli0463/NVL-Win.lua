@@ -140,7 +140,23 @@ local MemoryUI = {
 	ActiveSubSettings = nil,
 	WatermarkInstance = nil,
 	SpectatorInstance = nil,
+	KeybindsInstance = nil,
+	UISoundsEnabled = false,
+	KeybindSoundsEnabled = false,
 }
+
+local function PlayUISound(pitch)
+	if not MemoryUI.UISoundsEnabled then return end
+	pcall(function()
+		local snd = Instance.new("Sound")
+		snd.SoundId = "rbxassetid://6895079853"
+		snd.Volume = 0.25
+		snd.PlaybackSpeed = pitch or 1.05
+		snd.Parent = game:GetService("SoundService")
+		snd:Play()
+		game:GetService("Debris"):AddItem(snd, 0.5)
+	end)
+end
 
 local function Create(className: string, properties: { [string]: any }): Instance
 	local inst = Instance.new(className)
@@ -493,13 +509,13 @@ function MemoryUI:CreateWatermark(config)
 	end
 
 	local TitleTag = AddTag(title, true)
-	AddSep()
+	local Sep1 = Create("Frame", { Parent = Holder, Size = UDim2.new(0, 1, 0, 12), BackgroundColor3 = Color3.fromRGB(42, 45, 55), BorderSizePixel = 0, ZIndex = 81 })
 	local ServerTag = AddTag(serverName, false)
-	AddSep()
+	local Sep2 = Create("Frame", { Parent = Holder, Size = UDim2.new(0, 1, 0, 12), BackgroundColor3 = Color3.fromRGB(42, 45, 55), BorderSizePixel = 0, ZIndex = 81 })
 	local FPSTag = AddTag("144 FPS", false)
-	AddSep()
+	local Sep3 = Create("Frame", { Parent = Holder, Size = UDim2.new(0, 1, 0, 12), BackgroundColor3 = Color3.fromRGB(42, 45, 55), BorderSizePixel = 0, ZIndex = 81 })
 	local PingTag = AddTag("65 PING", false)
-	AddSep()
+	local Sep4 = Create("Frame", { Parent = Holder, Size = UDim2.new(0, 1, 0, 12), BackgroundColor3 = Color3.fromRGB(42, 45, 55), BorderSizePixel = 0, ZIndex = 81 })
 	local TimeTag = AddTag(os.date("%I:%M %p"), false)
 
 	-- Update FPS, Ping, and Time dynamically
@@ -530,9 +546,16 @@ function MemoryUI:CreateWatermark(config)
 
 	self.WatermarkInstance = Holder
 	return {
-		SetVisible = function(v) Holder.Visible = v end,
+		SetVisible = function(selfOrV, v)
+			local val = (type(selfOrV) == "boolean") and selfOrV or v
+			Holder.Visible = (val == true)
+		end,
 		SetTitle = function(t) TitleTag.Text = t end,
 		SetServer = function(s) ServerTag.Text = s end,
+		SetShowFPS = function(b) FPSTag.Visible = b; Sep2.Visible = b end,
+		SetShowPing = function(b) PingTag.Visible = b; Sep3.Visible = b end,
+		SetShowTime = function(b) TimeTag.Visible = b; Sep4.Visible = b end,
+		SetAccentColor = function(col) TitleTag.TextColor3 = col end,
 	}
 end
 
@@ -1165,16 +1188,18 @@ function MemoryUI:CreateKeybinds(config)
 	local WindowFrame = Create("Frame", {
 		Name = "KeybindsWindow",
 		Parent = self.ScreenGui,
-		Size = UDim2.new(0, 195, 0, 0),
+		Size = UDim2.new(0, 205, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Position = config.Position or UDim2.new(0, 20, 0, 210),
 		BackgroundColor3 = Color3.fromRGB(9, 10, 11),
+		BackgroundTransparency = visible and 0 or 1,
 		BorderSizePixel = 0,
 		Visible = visible,
 		ZIndex = 80,
 	})
 	Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = WindowFrame })
-	Create("UIStroke", { Parent = WindowFrame, Color = Color3.fromRGB(20, 23, 28), Thickness = 1 })
+	local WindowStroke = Create("UIStroke", { Parent = WindowFrame, Color = Color3.fromRGB(20, 23, 28), Thickness = 1, Transparency = visible and 0 or 1 })
+	local WindowScale = Create("UIScale", { Parent = WindowFrame, Scale = visible and 1 or 0.92 })
 
 	-- Header
 	local Header = Create("Frame", {
@@ -1285,15 +1310,53 @@ function MemoryUI:CreateKeybinds(config)
 		WindowFrame = WindowFrame,
 		Header = Header,
 		BindsContainer = BindsContainer,
+		ShowKeyName = (config.ShowKeyName ~= false),
 	}
 
-	function controller:SetVisible(vis)
-		WindowFrame.Visible = vis
+	local visToken = 0
+	local isHudVisible = visible
+
+	local function AnimateKeybindsWindow(show)
+		visToken = visToken + 1
+		local myToken = visToken
+		isHudVisible = show
+		if show then
+			WindowFrame.Visible = true
+			WindowScale.Scale = 0.92
+			WindowFrame.BackgroundTransparency = 0.8
+			WindowStroke.Transparency = 0.8
+			Tween(WindowScale, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
+			Tween(WindowFrame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 0 })
+			Tween(WindowStroke, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 0 })
+		else
+			Tween(WindowScale, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.92 })
+			Tween(WindowFrame, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { BackgroundTransparency = 1 })
+			Tween(WindowStroke, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Transparency = 1 })
+			task.delay(0.17, function()
+				if visToken == myToken and not isHudVisible and WindowFrame and WindowFrame.Parent then
+					WindowFrame.Visible = false
+				end
+			end)
+		end
 	end
 
-	function controller:Toggle()
-		WindowFrame.Visible = not WindowFrame.Visible
+	-- Supports both Keybinds:SetVisible(bool) and Keybinds.SetVisible(bool)
+	function controller.SetVisible(selfOrVal, vis)
+		local targetVis = (type(selfOrVal) == "boolean") and selfOrVal or vis
+		if targetVis == nil then targetVis = true end
+		AnimateKeybindsWindow(targetVis)
 	end
+
+	function controller.Toggle(selfOrUnused)
+		AnimateKeybindsWindow(not isHudVisible)
+	end
+
+	function controller:SetShowKeyName(val)
+		self.ShowKeyName = (val ~= false)
+		self:Refresh()
+	end
+
+	local prevActiveSet = {}
 
 	function controller:Refresh()
 		for _, ch in ipairs(BindsContainer:GetChildren()) do
@@ -1302,6 +1365,7 @@ function MemoryUI:CreateKeybinds(config)
 			end
 		end
 
+		local nextActiveSet = {}
 		local activeCount = 0
 		for name, bindData in pairs(MemoryUI.RegisteredKeybinds) do
 			if bindData.ShowInBinds then
@@ -1315,47 +1379,62 @@ function MemoryUI:CreateKeybinds(config)
 
 				if isActive then
 					activeCount = activeCount + 1
+					nextActiveSet[name] = true
+					local isNewlyActive = not prevActiveSet[name]
+
 					local row = Create("Frame", {
 						Name = "Bind_" .. name,
 						Parent = BindsContainer,
-						Size = UDim2.new(1, 0, 0, 22),
+						Size = UDim2.new(1, 0, 0, isNewlyActive and 0 or 22),
 						BackgroundTransparency = 1,
+						ClipsDescendants = true,
 						ZIndex = 82,
 					})
 
 					-- Feature Name (Left)
-					Create("TextLabel", {
+					local nameLbl = Create("TextLabel", {
 						Parent = row,
-						Size = UDim2.new(1, -65, 1, 0),
-						Position = UDim2.new(0, 10, 0, 0),
+						Size = UDim2.new(1, -86, 1, 0),
+						Position = UDim2.new(0, isNewlyActive and 2 or 10, 0, 0),
 						BackgroundTransparency = 1,
 						Font = Enum.Font.GothamMedium,
 						Text = name,
 						TextColor3 = Theme.TextWhite,
+						TextTransparency = isNewlyActive and 1 or 0,
 						TextSize = 10.5,
 						TextXAlignment = Enum.TextXAlignment.Left,
 						TextTruncate = Enum.TextTruncate.AtEnd,
 						ZIndex = 83,
 					})
 
-					-- Mode Badge (Right: e.g. [toggle] in Accent color)
+					-- Key + Mode Badge (Right: e.g. [X | toggle] in Accent color)
 					local modeText = string.lower(bindData.Mode or "toggle")
-					Create("TextLabel", {
+					local keyName = (bindData.Key and bindData.Key.Name) or "?"
+					local badgeText = controller.ShowKeyName and string.format("[%s | %s]", keyName, modeText) or ("[" .. modeText .. "]")
+					local badgeLbl = Create("TextLabel", {
 						Parent = row,
-						Size = UDim2.new(0, 52, 1, 0),
-						Position = UDim2.new(1, -58, 0, 0),
+						Size = UDim2.new(0, 76, 1, 0),
+						Position = UDim2.new(1, -84, 0, 0),
 						BackgroundTransparency = 1,
 						Font = Enum.Font.GothamBold,
-						Text = "[" .. modeText .. "]",
+						Text = badgeText,
 						TextColor3 = Theme.Accent,
-						TextSize = 10,
+						TextTransparency = isNewlyActive and 1 or 0,
+						TextSize = 9.5,
 						TextXAlignment = Enum.TextXAlignment.Right,
 						ZIndex = 83,
 					})
+
+					if isNewlyActive then
+						Tween(row, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, 22) })
+						Tween(nameLbl, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Position = UDim2.new(0, 10, 0, 0), TextTransparency = 0 })
+						Tween(badgeLbl, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 })
+					end
 				end
 			end
 		end
 
+		prevActiveSet = nextActiveSet
 		EmptyLabel.Visible = (activeCount == 0)
 	end
 
@@ -2038,6 +2117,8 @@ function MemoryUI:CreateWindow(config)
 	local winSize = config.Size or UDim2.new(0, 868, 0, 681)
 	local toggleKey = config.ToggleKey or Enum.KeyCode.RightShift
 	local loginRequired = (config.LoginRequired == true)
+	MemoryUI.IsAuthenticated = not loginRequired
+	MemoryUI.IsOpen = true
 
 	if MemoryUI.ScreenGui then
 		pcall(function() MemoryUI.ScreenGui:Destroy() end)
@@ -2119,11 +2200,40 @@ function MemoryUI:CreateWindow(config)
 		table.insert(MemoryUI.Connections, moveConn)
 	end
 
+	local MenuScale = Create("UIScale", { Parent = MainFrame, Scale = 1 })
+	local currentToggleKey = toggleKey
+	local menuVisToken = 0
+
+	local function SetMenuOpen(openState)
+		MemoryUI.IsOpen = openState
+		if not MemoryUI.IsAuthenticated then
+			MainFrame.Visible = false
+			return
+		end
+		menuVisToken = menuVisToken + 1
+		local myToken = menuVisToken
+		if openState then
+			MainFrame.Visible = true
+			MenuScale.Scale = 0.94
+			Tween(MenuScale, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
+			PlayUISound(1.1)
+		else
+			MemoryUI:CloseActiveDropdown()
+			Tween(MenuScale, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.94 })
+			PlayUISound(0.9)
+			task.delay(0.16, function()
+				if menuVisToken == myToken and not MemoryUI.IsOpen and MainFrame and MainFrame.Parent then
+					MainFrame.Visible = false
+				end
+			end)
+		end
+	end
+
 	local keyConn = UserInputService.InputBegan:Connect(function(input, gpe)
 		if gpe then return end
-		if input.KeyCode == toggleKey then
-			MemoryUI.IsOpen = not MemoryUI.IsOpen
-			MainFrame.Visible = MemoryUI.IsOpen and MemoryUI.IsAuthenticated
+		if UserInputService:GetFocusedTextBox() then return end
+		if currentToggleKey and input.KeyCode == currentToggleKey then
+			SetMenuOpen(not MemoryUI.IsOpen)
 		end
 	end)
 	table.insert(MemoryUI.Connections, keyConn)
@@ -2514,6 +2624,42 @@ function MemoryUI:CreateWindow(config)
 		SetKeybindsVisible = function(self, vis)
 			if MemoryUI.KeybindsInstance then
 				MemoryUI.KeybindsInstance:SetVisible(vis)
+			end
+		end,
+		SetToggleKey = function(self, newKey)
+			if typeof(newKey) == "EnumItem" then
+				currentToggleKey = newKey
+			end
+		end,
+		GetToggleKey = function(self)
+			return currentToggleKey
+		end,
+		SetOpen = function(self, openState)
+			SetMenuOpen(openState)
+		end,
+		SetParticlesEnabled = function(self, enabled)
+			if ParticleLayer then
+				ParticleLayer.Visible = (enabled == true)
+			end
+		end,
+		SetMenuTransparency = function(self, alpha)
+			local a = math.clamp(tonumber(alpha) or 0, 0, 0.75)
+			if MainFrame then
+				MainFrame.BackgroundTransparency = a
+			end
+		end,
+		SetUISounds = function(self, enabled)
+			MemoryUI.UISoundsEnabled = (enabled == true)
+		end,
+		SetKeybindSounds = function(self, enabled)
+			MemoryUI.KeybindSoundsEnabled = (enabled == true)
+		end,
+		SetAccentColor = function(self, col)
+			if typeof(col) == "Color3" then
+				Theme.Accent = col
+				if MemoryUI.KeybindsInstance and MemoryUI.KeybindsInstance.Refresh then
+					MemoryUI.KeybindsInstance:Refresh()
+				end
 			end
 		end,
 	}
@@ -3097,7 +3243,10 @@ function MemoryUI:CreateWindow(config)
 					end
 				end
 
-				Pill.MouseButton1Click:Connect(function() SetState(not currentState) end)
+				Pill.MouseButton1Click:Connect(function()
+					PlayUISound(1.05)
+					SetState(not currentState)
+				end)
 
 				-- Active Keybind Listener (Toggle / Hold / Always modes)
 				local keyConnBegan = UserInputService.InputBegan:Connect(function(input, gpe)
@@ -3106,6 +3255,17 @@ function MemoryUI:CreateWindow(config)
 					if currentKey and input.KeyCode == currentKey then
 						if currentMode == "Toggle" then
 							SetState(not currentState)
+							if MemoryUI.KeybindSoundsEnabled then
+								pcall(function()
+									local snd = Instance.new("Sound")
+									snd.SoundId = "rbxassetid://6895079853"
+									snd.Volume = 0.3
+									snd.PlaybackSpeed = currentState and 1.2 or 0.85
+									snd.Parent = game:GetService("SoundService")
+									snd:Play()
+									game:GetService("Debris"):AddItem(snd, 0.4)
+								end)
+							end
 						elseif currentMode == "Hold" then
 							SetState(true)
 						elseif currentMode == "Always" then
@@ -3939,6 +4099,85 @@ function MemoryUI:CreateWindow(config)
 						pcall(callback, col)
 					end,
 					Get = function() return currentColor end,
+				}
+			end
+
+			function Card:CreateKeybind(keybindConfig)
+				keybindConfig = keybindConfig or {}
+				local kbName = keybindConfig.Name or "Keybind"
+				local currentKey = keybindConfig.Default or Enum.KeyCode.RightShift
+				local callback = keybindConfig.Callback or function() end
+
+				local Row = Create("Frame", {
+					Name = "Keybind_" .. kbName,
+					Parent = ItemsContainer,
+					Size = UDim2.new(1, 0, 0, 34),
+					BackgroundTransparency = 1,
+					ZIndex = 3,
+				})
+				table.insert(Card.Items, { Name = kbName, Instance = Row })
+
+				Create("TextLabel", {
+					Parent = Row,
+					Size = UDim2.new(1, -110, 1, 0),
+					Position = UDim2.new(0, 12, 0, 0),
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamMedium,
+					Text = kbName,
+					TextColor3 = Theme.TextBright,
+					TextSize = 11.5,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					ZIndex = 4,
+				})
+
+				local KeyBtn = Create("TextButton", {
+					Name = "KeyButton",
+					Parent = Row,
+					Size = UDim2.new(0, 86, 0, 22),
+					Position = UDim2.new(1, -98, 0.5, -11),
+					BackgroundColor3 = Theme.Field,
+					BorderSizePixel = 0,
+					Font = Enum.Font.GothamBold,
+					Text = currentKey and currentKey.Name or "None",
+					TextColor3 = Theme.Accent,
+					TextSize = 10.5,
+					AutoButtonColor = false,
+					ZIndex = 5,
+				})
+				Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = KeyBtn })
+				local KeyStroke = Create("UIStroke", { Parent = KeyBtn, Color = Theme.FieldStroke, Thickness = 1 })
+
+				local listening = false
+				KeyBtn.MouseButton1Click:Connect(function()
+					PlayUISound(1.0)
+					listening = true
+					KeyBtn.Text = "..."
+					Tween(KeyStroke, TweenInfo.new(0.15), { Color = Theme.Accent })
+				end)
+
+				local kbConn = UserInputService.InputBegan:Connect(function(input)
+					if listening and input.UserInputType == Enum.UserInputType.Keyboard then
+						listening = false
+						Tween(KeyStroke, TweenInfo.new(0.15), { Color = Theme.FieldStroke })
+						if input.KeyCode ~= Enum.KeyCode.Escape then
+							currentKey = input.KeyCode
+							pcall(callback, currentKey)
+						end
+						KeyBtn.Text = currentKey and currentKey.Name or "None"
+						PlayUISound(1.15)
+					end
+				end)
+				table.insert(MemoryUI.Connections, kbConn)
+
+				return {
+					Set = function(k)
+						if typeof(k) == "EnumItem" then
+							currentKey = k
+							KeyBtn.Text = k.Name
+							pcall(callback, k)
+						end
+					end,
+					Get = function() return currentKey end,
 				}
 			end
 

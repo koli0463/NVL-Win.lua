@@ -5188,12 +5188,336 @@ CardServerTelemetry:CreateToggle({
 })
 
 -- ========================================================================
--- Populate Config Tab (HUD Controls)
+-- External HUDs: Target Info HUD & Custom Dynamic Crosshair Overlay
+-- ========================================================================
+do
+local TargetHUDState = {
+	Enabled = false,
+}
+local CrosshairState = {
+	Enabled = false,
+	Style = "Neverlose",
+	Color = Color3.fromRGB(186, 145, 252),
+	Size = 10,
+	Gap = 4,
+	Thickness = 2,
+}
+
+-- 1. Target Info HUD (Draggable Neverlose Card)
+local TargetHUDFrame = nil
+local TargetHUDScale = nil
+local TargetHUDAvatar = nil
+local TargetHUDName = nil
+local TargetHUDInfo = nil
+local TargetHUDHPFill = nil
+local TargetHUDHPText = nil
+local TargetHUDVisibleState = false
+
+local function EnsureTargetHUD()
+	if TargetHUDFrame and TargetHUDFrame.Parent then return end
+	local parentGui = MemoryUI.ScreenGui or CoreGui:FindFirstChild("NVL_Memory_UI")
+	if not parentGui then return end
+
+	TargetHUDFrame = Instance.new("Frame")
+	TargetHUDFrame.Name = "TargetHUDWindow"
+	TargetHUDFrame.Size = UDim2.new(0, 230, 0, 68)
+	TargetHUDFrame.Position = UDim2.new(0.5, -115, 0.72, 0)
+	TargetHUDFrame.BackgroundColor3 = Color3.fromRGB(11, 11, 14)
+	TargetHUDFrame.BorderSizePixel = 0
+	TargetHUDFrame.Visible = false
+	TargetHUDFrame.ZIndex = 75
+	TargetHUDFrame.Parent = parentGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = TargetHUDFrame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(28, 28, 36)
+	stroke.Thickness = 1
+	stroke.Parent = TargetHUDFrame
+
+	TargetHUDScale = Instance.new("UIScale")
+	TargetHUDScale.Scale = 0.94
+	TargetHUDScale.Parent = TargetHUDFrame
+
+	local topBar = Instance.new("Frame")
+	topBar.Size = UDim2.new(1, 0, 0, 2)
+	topBar.BackgroundColor3 = Color3.fromRGB(186, 145, 252)
+	topBar.BorderSizePixel = 0
+	topBar.ZIndex = 76
+	topBar.Parent = TargetHUDFrame
+
+	TargetHUDAvatar = Instance.new("ImageLabel")
+	TargetHUDAvatar.Size = UDim2.new(0, 44, 0, 44)
+	TargetHUDAvatar.Position = UDim2.new(0, 10, 0, 13)
+	TargetHUDAvatar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+	TargetHUDAvatar.BorderSizePixel = 0
+	TargetHUDAvatar.Image = ""
+	TargetHUDAvatar.ZIndex = 76
+	TargetHUDAvatar.Parent = TargetHUDFrame
+	local avCorner = Instance.new("UICorner")
+	avCorner.CornerRadius = UDim.new(0, 5)
+	avCorner.Parent = TargetHUDAvatar
+
+	TargetHUDName = Instance.new("TextLabel")
+	TargetHUDName.Size = UDim2.new(1, -68, 0, 16)
+	TargetHUDName.Position = UDim2.new(0, 62, 0, 12)
+	TargetHUDName.BackgroundTransparency = 1
+	TargetHUDName.Font = Enum.Font.GothamBold
+	TargetHUDName.Text = "Target"
+	TargetHUDName.TextColor3 = Color3.fromRGB(240, 240, 245)
+	TargetHUDName.TextSize = 12
+	TargetHUDName.TextXAlignment = Enum.TextXAlignment.Left
+	TargetHUDName.TextTruncate = Enum.TextTruncate.AtEnd
+	TargetHUDName.ZIndex = 76
+	TargetHUDName.Parent = TargetHUDFrame
+
+	TargetHUDInfo = Instance.new("TextLabel")
+	TargetHUDInfo.Size = UDim2.new(1, -68, 0, 14)
+	TargetHUDInfo.Position = UDim2.new(0, 62, 0, 28)
+	TargetHUDInfo.BackgroundTransparency = 1
+	TargetHUDInfo.Font = Enum.Font.GothamMedium
+	TargetHUDInfo.Text = "0.0m | Resolver: ON"
+	TargetHUDInfo.TextColor3 = Color3.fromRGB(150, 150, 165)
+	TargetHUDInfo.TextSize = 10
+	TargetHUDInfo.TextXAlignment = Enum.TextXAlignment.Left
+	TargetHUDInfo.ZIndex = 76
+	TargetHUDInfo.Parent = TargetHUDFrame
+
+	local hpBg = Instance.new("Frame")
+	hpBg.Size = UDim2.new(1, -110, 0, 6)
+	hpBg.Position = UDim2.new(0, 62, 0, 48)
+	hpBg.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+	hpBg.BorderSizePixel = 0
+	hpBg.ZIndex = 76
+	hpBg.Parent = TargetHUDFrame
+	local hpBgC = Instance.new("UICorner")
+	hpBgC.CornerRadius = UDim.new(1, 0)
+	hpBgC.Parent = hpBg
+
+	TargetHUDHPFill = Instance.new("Frame")
+	TargetHUDHPFill.Size = UDim2.new(1, 0, 1, 0)
+	TargetHUDHPFill.BackgroundColor3 = Color3.fromRGB(186, 145, 252)
+	TargetHUDHPFill.BorderSizePixel = 0
+	TargetHUDHPFill.ZIndex = 77
+	TargetHUDHPFill.Parent = hpBg
+	local hpFillC = Instance.new("UICorner")
+	hpFillC.CornerRadius = UDim.new(1, 0)
+	hpFillC.Parent = TargetHUDHPFill
+
+	TargetHUDHPText = Instance.new("TextLabel")
+	TargetHUDHPText.Size = UDim2.new(0, 40, 0, 14)
+	TargetHUDHPText.Position = UDim2.new(1, -46, 0, 44)
+	TargetHUDHPText.BackgroundTransparency = 1
+	TargetHUDHPText.Font = Enum.Font.GothamBold
+	TargetHUDHPText.Text = "100"
+	TargetHUDHPText.TextColor3 = Color3.fromRGB(186, 145, 252)
+	TargetHUDHPText.TextSize = 10
+	TargetHUDHPText.TextXAlignment = Enum.TextXAlignment.Right
+	TargetHUDHPText.ZIndex = 76
+	TargetHUDHPText.Parent = TargetHUDFrame
+
+	-- Draggable
+	local dragging, dragStart, startPos
+	TargetHUDFrame.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = inp.Position
+			startPos = TargetHUDFrame.Position
+			inp.Changed:Connect(function()
+				if inp.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	NVL_Connect(UserInputService.InputChanged, function(inp)
+		if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+			local delta = inp.Position - dragStart
+			TargetHUDFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+local lastTargetAvatarId = nil
+task.spawn(function()
+	while task.wait(0.1) do
+		if not TargetHUDState.Enabled then
+			if TargetHUDFrame and TargetHUDVisibleState then
+				TargetHUDVisibleState = false
+				TargetHUDFrame.Visible = false
+			end
+			continue
+		end
+		EnsureTargetHUD()
+		if not TargetHUDFrame then continue end
+
+		local tgt = CombatState.LockedPlayer or CurrentTarget
+		if tgt then
+			local isPlr = typeof(tgt) == "Instance" and tgt:IsA("Player")
+			local char = isPlr and tgt.Character or tgt
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if char and hum and hum.Health > 0 and hrp then
+				if not TargetHUDVisibleState then
+					TargetHUDVisibleState = true
+					TargetHUDFrame.Visible = true
+					if TargetHUDScale then
+						TargetHUDScale.Scale = 0.94
+						TweenService:Create(TargetHUDScale, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+					end
+				end
+				TargetHUDName.Text = isPlr and (tgt.DisplayName .. " (@" .. tgt.Name .. ")") or char.Name
+				local hpPct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+				TargetHUDHPFill.Size = UDim2.new(hpPct, 0, 1, 0)
+				TargetHUDHPFill.BackgroundColor3 = GetHealthColor(hpPct)
+				TargetHUDHPText.Text = tostring(math.floor(hum.Health))
+
+				local localHrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+				local dist = localHrp and (localHrp.Position - hrp.Position).Magnitude or 0
+				TargetHUDInfo.Text = string.format("%.1fm | %s", dist, CombatState.Resolver and "Resolver: ON" or "Resolver: OFF")
+
+				if isPlr and lastTargetAvatarId ~= tgt.UserId then
+					lastTargetAvatarId = tgt.UserId
+					task.spawn(function()
+						local ok, thumb = pcall(function()
+							return Players:GetUserThumbnailAsync(tgt.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+						end)
+						if ok and thumb and TargetHUDAvatar then
+							TargetHUDAvatar.Image = thumb
+						end
+					end)
+				end
+			else
+				TargetHUDVisibleState = false
+				TargetHUDFrame.Visible = false
+			end
+		else
+			TargetHUDVisibleState = false
+			TargetHUDFrame.Visible = false
+		end
+	end
+end)
+
+-- 2. Custom Dynamic Crosshair Overlay
+local CrosshairGui = Instance.new("ScreenGui")
+CrosshairGui.Name = "NVL_CrosshairHUD"
+CrosshairGui.ResetOnSpawn = false
+CrosshairGui.DisplayOrder = 95
+CrosshairGui.IgnoreGuiInset = true
+CrosshairGui.Parent = CoreGui
+
+local CrosshairCenter = Instance.new("Frame")
+CrosshairCenter.Name = "Center"
+CrosshairCenter.Size = UDim2.new(0, 0, 0, 0)
+CrosshairCenter.Position = UDim2.new(0.5, 0, 0.5, 0)
+CrosshairCenter.BackgroundTransparency = 1
+CrosshairCenter.Visible = false
+CrosshairCenter.Parent = CrosshairGui
+
+local chTop = Instance.new("Frame", CrosshairCenter)
+local chBottom = Instance.new("Frame", CrosshairCenter)
+local chLeft = Instance.new("Frame", CrosshairCenter)
+local chRight = Instance.new("Frame", CrosshairCenter)
+local chDot = Instance.new("Frame", CrosshairCenter)
+Instance.new("UICorner", chDot).CornerRadius = UDim.new(1, 0)
+local chRing = Instance.new("Frame", CrosshairCenter)
+chRing.BackgroundTransparency = 1
+Instance.new("UICorner", chRing).CornerRadius = UDim.new(1, 0)
+local chRingStroke = Instance.new("UIStroke", chRing)
+
+for _, f in ipairs({ chTop, chBottom, chLeft, chRight, chDot }) do
+	f.BorderSizePixel = 0
+end
+
+local function RefreshCrosshair()
+	CrosshairCenter.Visible = CrosshairState.Enabled
+	if not CrosshairState.Enabled then return end
+
+	local col = CrosshairState.Color
+	local sz = CrosshairState.Size
+	local gap = CrosshairState.Gap
+	local th = CrosshairState.Thickness
+	local style = CrosshairState.Style
+
+	for _, f in ipairs({ chTop, chBottom, chLeft, chRight, chDot }) do
+		f.BackgroundColor3 = col
+		f.Visible = false
+	end
+	chRing.Visible = false
+	chRingStroke.Color = col
+	chRingStroke.Thickness = th
+
+	if style ~= "Dynamic Spin" then
+		CrosshairCenter.Rotation = 0
+	end
+
+	if style == "Dot" then
+		chDot.Visible = true
+		chDot.Size = UDim2.new(0, th * 2 + 2, 0, th * 2 + 2)
+		chDot.Position = UDim2.new(0, -(th + 1), 0, -(th + 1))
+	elseif style == "Circle" then
+		chRing.Visible = true
+		local d = (sz + gap) * 2
+		chRing.Size = UDim2.new(0, d, 0, d)
+		chRing.Position = UDim2.new(0, -d / 2, 0, -d / 2)
+		chDot.Visible = true
+		chDot.Size = UDim2.new(0, th + 1, 0, th + 1)
+		chDot.Position = UDim2.new(0, -(th + 1) / 2, 0, -(th + 1) / 2)
+	elseif style == "T-Cross" then
+		chBottom.Visible = true; chLeft.Visible = true; chRight.Visible = true
+		chBottom.Size = UDim2.new(0, th, 0, sz); chBottom.Position = UDim2.new(0, -th / 2, 0, gap)
+		chLeft.Size = UDim2.new(0, sz, 0, th); chLeft.Position = UDim2.new(0, -(gap + sz), 0, -th / 2)
+		chRight.Size = UDim2.new(0, sz, 0, th); chRight.Position = UDim2.new(0, gap, 0, -th / 2)
+	elseif style == "Chevron" then
+		chLeft.Visible = true; chRight.Visible = true; chDot.Visible = true
+		chLeft.Rotation = -45; chRight.Rotation = 45
+		chLeft.Size = UDim2.new(0, sz, 0, th); chLeft.Position = UDim2.new(0, -(sz * 0.7), 0, gap)
+		chRight.Size = UDim2.new(0, sz, 0, th); chRight.Position = UDim2.new(0, 0, 0, gap)
+		chDot.Size = UDim2.new(0, th + 1, 0, th + 1); chDot.Position = UDim2.new(0, -(th + 1) / 2, 0, -(th + 1) / 2)
+	elseif style == "Neverlose" then
+		chTop.Visible = true; chBottom.Visible = true; chLeft.Visible = true; chRight.Visible = true; chDot.Visible = true; chRing.Visible = true
+		chLeft.Rotation = 0; chRight.Rotation = 0
+		chTop.Size = UDim2.new(0, th, 0, sz); chTop.Position = UDim2.new(0, -th / 2, 0, -(gap + sz))
+		chBottom.Size = UDim2.new(0, th, 0, sz); chBottom.Position = UDim2.new(0, -th / 2, 0, gap)
+		chLeft.Size = UDim2.new(0, sz, 0, th); chLeft.Position = UDim2.new(0, -(gap + sz), 0, -th / 2)
+		chRight.Size = UDim2.new(0, sz, 0, th); chRight.Position = UDim2.new(0, gap, 0, -th / 2)
+		chDot.Size = UDim2.new(0, th + 2, 0, th + 2); chDot.Position = UDim2.new(0, -(th + 2) / 2, 0, -(th + 2) / 2)
+		local d = (gap + sz * 0.6) * 2
+		chRing.Size = UDim2.new(0, d, 0, d); chRing.Position = UDim2.new(0, -d / 2, 0, -d / 2)
+		chRingStroke.Thickness = 1
+	else -- "Cross" or "Dynamic Spin"
+		chTop.Visible = true; chBottom.Visible = true; chLeft.Visible = true; chRight.Visible = true
+		chLeft.Rotation = 0; chRight.Rotation = 0
+		chTop.Size = UDim2.new(0, th, 0, sz); chTop.Position = UDim2.new(0, -th / 2, 0, -(gap + sz))
+		chBottom.Size = UDim2.new(0, th, 0, sz); chBottom.Position = UDim2.new(0, -th / 2, 0, gap)
+		chLeft.Size = UDim2.new(0, sz, 0, th); chLeft.Position = UDim2.new(0, -(gap + sz), 0, -th / 2)
+		chRight.Size = UDim2.new(0, sz, 0, th); chRight.Position = UDim2.new(0, gap, 0, -th / 2)
+	end
+end
+
+NVL_Connect(RunService.RenderStepped, function(dt)
+	if CrosshairState.Enabled and CrosshairState.Style == "Dynamic Spin" then
+		CrosshairCenter.Rotation = (CrosshairCenter.Rotation + dt * 140) % 360
+	end
+end)
+
+-- ========================================================================
+-- Populate Config Tab (HUD Controls & Appearance)
 -- ========================================================================
 local HUDCard = ConfigTab:CreateCard({
-	Title = "HUD Overlays",
+	Title = "HUD Overlays & Menu Key",
 	Side = "left",
 	Icon = MemoryAssets.Icons.settings_bold or "",
+})
+HUDCard:CreateKeybind({
+	Name = "Menu Toggle Key",
+	Default = Enum.KeyCode.RightShift,
+	Callback = function(newKey)
+		if Window and Window.SetToggleKey then
+			Window:SetToggleKey(newKey)
+			MemoryUI:Notify({ Title = "Menu Keybind", Content = "Menu toggle key set to [" .. newKey.Name .. "]", Duration = 2 })
+		end
+	end,
 })
 HUDCard:CreateToggle({
 	Name = "Live Watermark",
@@ -5218,10 +5542,348 @@ HUDCard:CreateToggle({
 	Default = true,
 	Callback = function(v)
 		if Keybinds and Keybinds.SetVisible then
-			Keybinds.SetVisible(v)
+			Keybinds:SetVisible(v)
 		end
 	end,
 })
+HUDCard:CreateToggle({
+	Name = "Show Key in Keybinds HUD",
+	Default = true,
+	Callback = function(v)
+		if Keybinds and Keybinds.SetShowKeyName then
+			Keybinds:SetShowKeyName(v)
+		end
+	end,
+})
+HUDCard:CreateToggle({
+	Name = "Target Info HUD",
+	Default = false,
+	Callback = function(v)
+		TargetHUDState.Enabled = v
+	end,
+})
+
+local CrosshairCard = ConfigTab:CreateCard({
+	Title = "Custom Crosshair Overlay",
+	Side = "left",
+	Icon = MemoryAssets.Icons.target_fill or "",
+})
+CrosshairCard:CreateToggle({
+	Name = "Enable Crosshair",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = CrosshairState.Color,
+	Callback = function(v)
+		CrosshairState.Enabled = v
+		RefreshCrosshair()
+	end,
+	ColorCallback = function(c)
+		CrosshairState.Color = c
+		RefreshCrosshair()
+	end,
+})
+CrosshairCard:CreateDropdown({
+	Name = "Crosshair Style",
+	Options = { "Neverlose", "Cross", "Dot", "Circle", "Chevron", "T-Cross", "Dynamic Spin" },
+	Default = "Neverlose",
+	Callback = function(opt)
+		CrosshairState.Style = opt
+		RefreshCrosshair()
+	end,
+})
+CrosshairCard:CreateSlider({
+	Name = "Crosshair Size",
+	Min = 4,
+	Max = 30,
+	Default = 10,
+	Decimals = 0,
+	Callback = function(v)
+		CrosshairState.Size = v
+		RefreshCrosshair()
+	end,
+})
+CrosshairCard:CreateSlider({
+	Name = "Crosshair Gap",
+	Min = 0,
+	Max = 20,
+	Default = 4,
+	Decimals = 0,
+	Callback = function(v)
+		CrosshairState.Gap = v
+		RefreshCrosshair()
+	end,
+})
+CrosshairCard:CreateSlider({
+	Name = "Crosshair Thickness",
+	Min = 1,
+	Max = 6,
+	Default = 2,
+	Decimals = 0,
+	Callback = function(v)
+		CrosshairState.Thickness = v
+		RefreshCrosshair()
+	end,
+})
+
+-- 3. Performance & Telemetry Mini-HUD
+local PerfHUDState = { Enabled = false }
+local PerfHUDFrame = nil
+local PerfHUDFpsLbl, PerfHUDPingLbl, PerfHUDMemLbl
+
+local function EnsurePerfHUD()
+	if PerfHUDFrame and PerfHUDFrame.Parent then return end
+	local parentGui = MemoryUI.ScreenGui or CoreGui:FindFirstChild("NVL_Memory_UI")
+	if not parentGui then return end
+
+	PerfHUDFrame = Instance.new("Frame")
+	PerfHUDFrame.Name = "PerfHUDWindow"
+	PerfHUDFrame.Size = UDim2.new(0, 195, 0, 56)
+	PerfHUDFrame.Position = UDim2.new(0, 20, 0, 380)
+	PerfHUDFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 13)
+	PerfHUDFrame.BorderSizePixel = 0
+	PerfHUDFrame.Visible = false
+	PerfHUDFrame.ZIndex = 75
+	PerfHUDFrame.Parent = parentGui
+	Instance.new("UICorner", PerfHUDFrame).CornerRadius = UDim.new(0, 6)
+	local st = Instance.new("UIStroke", PerfHUDFrame)
+	st.Color = Color3.fromRGB(24, 26, 32)
+	st.Thickness = 1
+
+	local hdr = Instance.new("TextLabel", PerfHUDFrame)
+	hdr.Size = UDim2.new(1, -16, 0, 20)
+	hdr.Position = UDim2.new(0, 10, 0, 4)
+	hdr.BackgroundTransparency = 1
+	hdr.Font = Enum.Font.GothamBold
+	hdr.Text = "TELEMETRY"
+	hdr.TextColor3 = Color3.fromRGB(186, 145, 252)
+	hdr.TextSize = 10
+	hdr.TextXAlignment = Enum.TextXAlignment.Left
+	hdr.ZIndex = 76
+
+	local row = Instance.new("Frame", PerfHUDFrame)
+	row.Size = UDim2.new(1, -20, 0, 22)
+	row.Position = UDim2.new(0, 10, 0, 26)
+	row.BackgroundTransparency = 1
+	row.ZIndex = 76
+
+	PerfHUDFpsLbl = Instance.new("TextLabel", row)
+	PerfHUDFpsLbl.Size = UDim2.new(0.33, 0, 1, 0)
+	PerfHUDFpsLbl.BackgroundTransparency = 1
+	PerfHUDFpsLbl.Font = Enum.Font.GothamBold
+	PerfHUDFpsLbl.Text = "60 FPS"
+	PerfHUDFpsLbl.TextColor3 = Color3.fromRGB(141, 209, 130)
+	PerfHUDFpsLbl.TextSize = 10.5
+	PerfHUDFpsLbl.TextXAlignment = Enum.TextXAlignment.Left
+	PerfHUDFpsLbl.ZIndex = 77
+
+	PerfHUDPingLbl = Instance.new("TextLabel", row)
+	PerfHUDPingLbl.Size = UDim2.new(0.33, 0, 1, 0)
+	PerfHUDPingLbl.Position = UDim2.new(0.33, 0, 0, 0)
+	PerfHUDPingLbl.BackgroundTransparency = 1
+	PerfHUDPingLbl.Font = Enum.Font.GothamBold
+	PerfHUDPingLbl.Text = "0 ms"
+	PerfHUDPingLbl.TextColor3 = Color3.fromRGB(240, 240, 245)
+	PerfHUDPingLbl.TextSize = 10.5
+	PerfHUDPingLbl.ZIndex = 77
+
+	PerfHUDMemLbl = Instance.new("TextLabel", row)
+	PerfHUDMemLbl.Size = UDim2.new(0.34, 0, 1, 0)
+	PerfHUDMemLbl.Position = UDim2.new(0.66, 0, 0, 0)
+	PerfHUDMemLbl.BackgroundTransparency = 1
+	PerfHUDMemLbl.Font = Enum.Font.GothamBold
+	PerfHUDMemLbl.Text = "0 MB"
+	PerfHUDMemLbl.TextColor3 = Color3.fromRGB(160, 165, 180)
+	PerfHUDMemLbl.TextSize = 10.5
+	PerfHUDMemLbl.TextXAlignment = Enum.TextXAlignment.Right
+	PerfHUDMemLbl.ZIndex = 77
+
+	local dragging, dragStart, startPos
+	PerfHUDFrame.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true; dragStart = inp.Position; startPos = PerfHUDFrame.Position
+			inp.Changed:Connect(function() if inp.UserInputState == Enum.UserInputState.End then dragging = false end end)
+		end
+	end)
+	NVL_Connect(UserInputService.InputChanged, function(inp)
+		if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+			local d = inp.Position - dragStart
+			PerfHUDFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+task.spawn(function()
+	local StatsSvc = game:GetService("Stats")
+	while task.wait(0.5) do
+		if not PerfHUDState.Enabled then
+			if PerfHUDFrame then PerfHUDFrame.Visible = false end
+			continue
+		end
+		EnsurePerfHUD()
+		if PerfHUDFrame then
+			PerfHUDFrame.Visible = true
+			local fps = math.floor(Workspace:GetRealPhysicsFPS())
+			local ping = 0
+			pcall(function() ping = math.floor(StatsSvc.Network.ServerStatsItem["Data Ping"]:GetValue()) end)
+			local mem = math.floor(StatsSvc:GetTotalMemoryUsageMb())
+			PerfHUDFpsLbl.Text = tostring(fps) .. " FPS"
+			PerfHUDFpsLbl.TextColor3 = fps >= 50 and Color3.fromRGB(141, 209, 130) or Color3.fromRGB(236, 88, 92)
+			PerfHUDPingLbl.Text = tostring(ping) .. " ms"
+			PerfHUDMemLbl.Text = tostring(mem) .. " MB"
+		end
+	end
+end)
+
+-- 4. Screen Hitmarker Overlay
+local HitmarkerState = { Enabled = false, Color = Color3.fromRGB(255, 255, 255) }
+local HitmarkerGui = Instance.new("ScreenGui")
+HitmarkerGui.Name = "NVL_HitmarkerHUD"
+HitmarkerGui.ResetOnSpawn = false
+HitmarkerGui.DisplayOrder = 96
+HitmarkerGui.IgnoreGuiInset = true
+HitmarkerGui.Parent = CoreGui
+
+local HitmarkerCenter = Instance.new("Frame", HitmarkerGui)
+HitmarkerCenter.Size = UDim2.new(0, 0, 0, 0)
+HitmarkerCenter.Position = UDim2.new(0.5, 0, 0.5, 0)
+HitmarkerCenter.BackgroundTransparency = 1
+HitmarkerCenter.Visible = false
+
+local hmLines = {}
+for i, angle in ipairs({ 45, -45 }) do
+	local l1 = Instance.new("Frame", HitmarkerCenter)
+	l1.Size = UDim2.new(0, 14, 0, 2)
+	l1.Position = UDim2.new(0, -7, 0, -1)
+	l1.Rotation = angle
+	l1.BorderSizePixel = 0
+	l1.BackgroundTransparency = 1
+	table.insert(hmLines, l1)
+end
+
+local function FlashHitmarker()
+	if not HitmarkerState.Enabled then return end
+	HitmarkerCenter.Visible = true
+	for _, l in ipairs(hmLines) do
+		l.BackgroundColor3 = HitmarkerState.Color
+		l.BackgroundTransparency = 0
+		TweenService:Create(l, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 }):Play()
+	end
+end
+
+NVL_Connect(UserInputService.InputBegan, function(inp, gpe)
+	if not gpe and HitmarkerState.Enabled and inp.UserInputType == Enum.UserInputType.MouseButton1 then
+		if CurrentTarget or CombatState.LockedPlayer then
+			FlashHitmarker()
+		end
+	end
+end)
+
+local AppearanceCard = ConfigTab:CreateCard({
+	Title = "UI Appearance & Effects",
+	Side = "right",
+	Icon = MemoryAssets.Icons.dots_2 or "",
+})
+local ThemePresets = {
+	["Neverlose Purple"] = Color3.fromRGB(186, 145, 252),
+	["Skeet Green"] = Color3.fromRGB(156, 224, 59),
+	["Cyber Cyan"] = Color3.fromRGB(56, 217, 245),
+	["Crimson Blood"] = Color3.fromRGB(245, 75, 94),
+	["Golden Amber"] = Color3.fromRGB(255, 184, 48),
+	["Sakura Pink"] = Color3.fromRGB(255, 126, 182),
+	["Frost White"] = Color3.fromRGB(220, 228, 240),
+}
+AppearanceCard:CreateDropdown({
+	Name = "UI Theme Preset",
+	Options = { "Neverlose Purple", "Skeet Green", "Cyber Cyan", "Crimson Blood", "Golden Amber", "Sakura Pink", "Frost White" },
+	Default = "Neverlose Purple",
+	Callback = function(opt)
+		local col = ThemePresets[opt]
+		if col and Window and Window.SetAccentColor then
+			Window:SetAccentColor(col)
+			if Watermark and Watermark.SetAccentColor then Watermark.SetAccentColor(col) end
+		end
+	end,
+})
+AppearanceCard:CreateSlider({
+	Name = "Menu Transparency",
+	Min = 0,
+	Max = 0.6,
+	Default = 0,
+	Decimals = 2,
+	Callback = function(v)
+		if Window and Window.SetMenuTransparency then
+			Window:SetMenuTransparency(v)
+		end
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "Menu Snow Particles",
+	Default = true,
+	Callback = function(v)
+		if Window and Window.SetParticlesEnabled then
+			Window:SetParticlesEnabled(v)
+		end
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "UI Click Sounds",
+	Default = false,
+	Callback = function(v)
+		if Window and Window.SetUISounds then
+			Window:SetUISounds(v)
+		end
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "Keybind Toggle Sounds",
+	Default = false,
+	Callback = function(v)
+		if Window and Window.SetKeybindSounds then
+			Window:SetKeybindSounds(v)
+		end
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "Telemetry Mini-HUD",
+	Default = false,
+	Callback = function(v)
+		PerfHUDState.Enabled = v
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "Screen Hitmarker",
+	Default = false,
+	ColorBadge = true,
+	ColorValue = HitmarkerState.Color,
+	Callback = function(v)
+		HitmarkerState.Enabled = v
+	end,
+	ColorCallback = function(c)
+		HitmarkerState.Color = c
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "Watermark Show FPS",
+	Default = true,
+	Callback = function(v)
+		if Watermark and Watermark.SetShowFPS then Watermark.SetShowFPS(v) end
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "Watermark Show Ping",
+	Default = true,
+	Callback = function(v)
+		if Watermark and Watermark.SetShowPing then Watermark.SetShowPing(v) end
+	end,
+})
+AppearanceCard:CreateToggle({
+	Name = "Watermark Show Time",
+	Default = true,
+	Callback = function(v)
+		if Watermark and Watermark.SetShowTime then Watermark.SetShowTime(v) end
+	end,
+})
+end
 
 local ConfigCard = ConfigTab:CreateCard({
 	Title = "Config Manager",
