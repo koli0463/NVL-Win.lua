@@ -121,6 +121,11 @@ local Spectators = Window:CreateSpectators({
 	AutoTrack = true,
 })
 
+local Keybinds = Window:CreateKeybinds({
+	Title = "Keybinds",
+	Visible = true,
+})
+
 -- ========================================================================
 -- Sidebar Navigation Setup (Matching 1:1 Reference Hierarchy)
 -- ========================================================================
@@ -363,42 +368,172 @@ local function ResolveTargetPosition(targetInstance, rawPos)
 	end
 
 	local samples = hist.samples
-	if #samples < 5 then
+	if #samples < 3 then
 		return rawPos
 	end
 
-	-- Spatial Density Clustering: Find highest density spatial centroid
-	local bestCount = 0
-	local bestCentroid = rawPos
-	local minCluster = 3
+	local method = CombatState.ResolverMethod or "Spatial Density Cluster (UE)"
 
-	for i = 1, #samples do
-		local p1 = samples[i].pos
-		local clusterCount = 0
-		local clusterSum = Vector3.zero
+	if method == "Centroid Density" then
+		local sum = Vector3.zero
+		for i = 1, #samples do sum = sum + samples[i].pos end
+		local centroid = sum / #samples
+		hist.resolvedPos = centroid
+		return centroid
+	elseif method == "Kalman Prediction" then
+		if not hist.kalmanPos then
+			hist.kalmanPos = rawPos
+			hist.kalmanP = 1.0
+		end
+		local p_pred = hist.kalmanP + 0.05
+		local gain = p_pred / (p_pred + 0.5)
+		hist.kalmanPos = hist.kalmanPos + (rawPos - hist.kalmanPos) * gain
+		hist.kalmanP = (1 - gain) * p_pred
+		hist.resolvedPos = hist.kalmanPos
+		return hist.kalmanPos
+	elseif method == "Velocity Extrapolation" then
+		local char = (targetInstance:IsA("Player") and targetInstance.Character) or targetInstance
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local vel = hrp and hrp.AssemblyLinearVelocity or Vector3.zero
+		local pingSec = 0.06
+		local resolved = rawPos + (vel * pingSec)
+		hist.resolvedPos = resolved
+		return resolved
+	elseif method == "Inverse Acceleration" then
+		local pPrev = samples[#samples - 1] and samples[#samples - 1].pos or rawPos
+		local pPrev2 = samples[#samples - 2] and samples[#samples - 2].pos or pPrev
+		local vel1 = pPrev - pPrev2
+		local vel2 = rawPos - pPrev
+		local accel = vel2 - vel1
+		if accel.Magnitude > 12 then
+			local smoothed = pPrev + (vel1 * 0.8)
+			hist.resolvedPos = smoothed
+			return smoothed
+		end
+		return rawPos
+	elseif method == "Delta Angle Centroid" then
+		local char = (targetInstance:IsA("Player") and targetInstance.Character) or targetInstance
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local torso = char and (char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"))
+		if hrp and torso then
+			local delta = hrp.CFrame.LookVector:Cross(torso.CFrame.LookVector)
+			local angleOffset = delta * (forgiveness * 0.2)
+			local resolved = rawPos - angleOffset
+			hist.resolvedPos = resolved
+			return resolved
+		end
+		return rawPos
+	elseif method == "History Rewind Tick" then
+		local bestSample = samples[1].pos
+		local minDelta = math.huge
+		for i = 2, #samples do
+			local d = (samples[i].pos - samples[i-1].pos).Magnitude
+			if d < minDelta then
+				minDelta = d
+				bestSample = samples[i].pos
+			end
+		end
+		hist.resolvedPos = bestSample
+		return bestSample
+	else
+		-- "Spatial Density Cluster (UE)"
+		local bestCount = 0
+		local bestCentroid = rawPos
+		local minCluster = 3
 
-		for j = 1, #samples do
-			local p2 = samples[j].pos
-			if (p1 - p2).Magnitude <= forgiveness then
-				clusterCount = clusterCount + 1
-				clusterSum = clusterSum + p2
+		for i = 1, #samples do
+			local p1 = samples[i].pos
+			local clusterCount = 0
+			local clusterSum = Vector3.zero
+
+			for j = 1, #samples do
+				local p2 = samples[j].pos
+				if (p1 - p2).Magnitude <= forgiveness then
+					clusterCount = clusterCount + 1
+					clusterSum = clusterSum + p2
+				end
+			end
+
+			if clusterCount >= minCluster and clusterCount > bestCount then
+				bestCount = clusterCount
+				bestCentroid = clusterSum / clusterCount
 			end
 		end
 
-		if clusterCount >= minCluster and clusterCount > bestCount then
-			bestCount = clusterCount
-			bestCentroid = clusterSum / clusterCount
+		if bestCount >= minCluster then
+			hist.resolvedPos = bestCentroid
+			return bestCentroid
 		end
-	end
 
-	if bestCount >= minCluster then
-		hist.resolvedPos = bestCentroid
-		return bestCentroid
+		return rawPos
 	end
-
-	return rawPos
 end
 getgenv().ResolveTargetPosition = ResolveTargetPosition
+
+-- Helper: Resolve Preferred Hitbox part (7 modes)
+local function GetTargetHitboxPart(char)
+	if not char then return nil end
+	local head = char:FindFirstChild("Head")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local upperTorso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+	local lowerTorso = char:FindFirstChild("LowerTorso") or upperTorso or hrp
+
+	local pref = CombatState.TargetPart or "Head"
+	if CombatState.BodyAimbotMode == "Head Only" then
+		return head or hrp
+	elseif CombatState.BodyAimbotMode == "Chest Only" then
+		return upperTorso or hrp
+	elseif CombatState.BodyAimbotMode == "Pelvis Only" then
+		return lowerTorso or hrp
+	end
+
+	if pref == "Head" then
+		return head or hrp
+	elseif pref == "HumanoidRootPart" then
+		return hrp or upperTorso or head
+	elseif pref == "UpperTorso" then
+		return upperTorso or hrp or head
+	elseif pref == "LowerTorso" then
+		return lowerTorso or hrp or head
+	elseif pref == "Random" then
+		local pool = {}
+		if head then table.insert(pool, head) end
+		if upperTorso then table.insert(pool, upperTorso) end
+		if lowerTorso then table.insert(pool, lowerTorso) end
+		if hrp then table.insert(pool, hrp) end
+		return #pool > 0 and pool[math.random(1, #pool)] or (head or hrp)
+	elseif pref == "Nearest Bone" then
+		local mPos = UserInputService:GetMouseLocation()
+		local bestBone = head or hrp
+		local minD = math.huge
+		for _, part in ipairs({ head, upperTorso, lowerTorso, hrp }) do
+			if part then
+				local sp, onS = Camera:WorldToViewportPoint(part.Position)
+				if onS then
+					local d = (Vector2.new(sp.X, sp.Y) - mPos).Magnitude
+					if d < minD then minD = d bestBone = part end
+				end
+			end
+		end
+		return bestBone
+	elseif pref == "Smart Multi-Point" then
+		if CombatState.VisibleCheck and Camera then
+			local cp = Camera.CFrame.Position
+			for _, part in ipairs({ head, upperTorso, lowerTorso, hrp }) do
+				if part then
+					local rp = RaycastParams.new()
+					rp.FilterType = Enum.RaycastFilterType.Exclude
+					rp.FilterDescendantsInstances = { lp.Character, char }
+					if not Workspace:Raycast(cp, part.Position - cp, rp) then
+						return part
+					end
+				end
+			end
+		end
+		return head or hrp
+	end
+	return head or hrp
+end
 
 -- Target Selection (New Method: Priority scoring + wall check)
 local function GetClosestTarget()
@@ -417,7 +552,7 @@ local function GetClosestTarget()
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			local head = char and char:FindFirstChild("Head")
 			if char and char.Parent and hum and hum.Health > 0 and (hrp or head) then
-				local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+				local targetPart = GetTargetHitboxPart(char)
 				return p, targetPart
 			else
 				CombatState.LockedPlayer = nil
@@ -449,7 +584,8 @@ local function GetClosestTarget()
 						end
 					end
 
-					local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+					local targetPart = GetTargetHitboxPart(char)
+					if not targetPart then continue end
 					local partPos = targetPart.Position
 					local distToPlayer = (camPos - partPos).Magnitude
 
@@ -470,11 +606,24 @@ local function GetClosestTarget()
 								end
 
 								if isVisible then
+									local priority = CombatState.TargetPriority or "Target"
 									local score = screenDist
-									if CombatState.TargetPriority == "Lowest Distance" then
+									if priority == "Lowest Distance" then
 										score = distToPlayer
-									elseif CombatState.TargetPriority == "Lowest Health" then
+									elseif priority == "Lowest Health" then
 										score = hum.Health
+									elseif priority == "Closest to Crosshair" then
+										score = screenDist
+									elseif priority == "Highest Threat" then
+										local tool = char:FindFirstChildOfClass("Tool")
+										local threatMult = tool and 0.4 or 1.0
+										score = screenDist * threatMult
+									elseif priority == "Velocity Vector" then
+										local spd = hrp and hrp.AssemblyLinearVelocity.Magnitude or 0
+										score = 1000 / math.max(spd, 1)
+									elseif priority == "Unshielded First" then
+										local hasFF = char:FindFirstChildOfClass("ForceField") ~= nil
+										score = screenDist * (hasFF and 5.0 or 1.0)
 									else
 										score = screenDist
 										if CombatState.PrioritizeLowHealth then
@@ -504,7 +653,8 @@ local function GetClosestTarget()
 				local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso") or model:FindFirstChild("Head")
 				local head = model:FindFirstChild("Head")
 				if hum and hum.Health > 0 and hrp then
-					local targetPart = (CombatState.BodyAimbotMode == "Head Only" and head) or (head or hrp)
+					local targetPart = GetTargetHitboxPart(model)
+					if not targetPart then continue end
 					local partPos = targetPart.Position
 					local distToNpc = (camPos - partPos).Magnitude
 
@@ -525,11 +675,17 @@ local function GetClosestTarget()
 								end
 
 								if isVisible then
+									local priority = CombatState.TargetPriority or "Target"
 									local score = screenDist
-									if CombatState.TargetPriority == "Lowest Distance" then
+									if priority == "Lowest Distance" then
 										score = distToNpc
-									elseif CombatState.TargetPriority == "Lowest Health" then
+									elseif priority == "Lowest Health" then
 										score = hum.Health
+									elseif priority == "Closest to Crosshair" then
+										score = screenDist
+									elseif priority == "Velocity Vector" then
+										local spd = hrp and hrp.AssemblyLinearVelocity.Magnitude or 0
+										score = 1000 / math.max(spd, 1)
 									end
 
 									if score < bestScore then
@@ -832,19 +988,20 @@ local CardAccuracy = GeneralTab:CreateCard({
 
 CardAccuracy:CreateDropdown({
 	Name = "Visible",
-	Options = { "Selection", "Raycast", "Hitbox" },
+	Options = { "Selection", "Raycast", "Hitbox Scan", "Multi-Point Trace", "Penetration Scan", "Angle Cone", "Strict Occlusion" },
 	Default = "Selection",
 	Callback = function(opt)
-		CombatState.VisibleCheck = (opt == "Raycast" or opt == "Selection")
+		CombatState.VisibleMode = opt
+		CombatState.VisibleCheck = (opt ~= "Selection")
 	end,
 })
 
 CardAccuracy:CreateDropdown({
 	Name = "Force Conditions",
-	Options = { "Type", "Health", "Distance", "Movement" },
+	Options = { "Type", "Health", "Distance", "Movement", "Airborne Only", "Lethal Threshold", "Enemy Reloading" },
 	Default = "Type",
 	Callback = function(opt)
-		print("[NVL-Win] Force Conditions:", opt)
+		CombatState.ForceCondition = opt
 	end,
 })
 
@@ -853,13 +1010,13 @@ CardAccuracy:CreateToggle({
 	Default = true,
 	HasSettings = true,
 	Callback = function(v)
-		print("[NVL-Win] Head Safety If Lethal:", v)
+		CombatState.HeadSafetyLethal = v
 	end,
 })
 
 CardAccuracy:CreateDropdown({
 	Name = "Body Aimbot",
-	Options = { "Head, Body, Chest, Neck", "Head Only", "Chest Only", "Pelvis Only" },
+	Options = { "Head, Body, Chest, Neck", "Head Only", "Chest Only", "Pelvis Only", "Upper & Lower Torso", "Smart Lethal Priority", "Limbs Adaptive" },
 	Default = "Head, Body, Chest, Neck",
 	Callback = function(opt)
 		CombatState.BodyAimbotMode = opt
@@ -1020,10 +1177,10 @@ CardOthers:CreateToggle({
 
 CardOthers:CreateDropdown({
 	Name = "Conditions",
-	Options = { "Select", "Airborne", "Ducking", "Moving", "Target In View" },
+	Options = { "Select", "Airborne", "Ducking", "Moving", "Target In View", "Low Health (<30%)", "Weapon Equipped" },
 	Default = "Select",
 	Callback = function(opt)
-		print("[NVL-Win] Conditions:", opt)
+		CombatState.TriggerConditions = opt
 	end,
 })
 
@@ -1141,7 +1298,7 @@ local CardAimbotMainRight = AimbotTab:CreateCard({
 })
 CardAimbotMainRight:CreateDropdown({
 	Name = "Target Priority",
-	Options = { "Target", "Closest to Crosshair", "Lowest Health", "Lowest Distance" },
+	Options = { "Target", "Closest to Crosshair", "Lowest Health", "Lowest Distance", "Highest Threat", "Velocity Vector", "Unshielded First" },
 	Default = "Target",
 	Callback = function(opt)
 		CombatState.TargetPriority = opt
@@ -1204,10 +1361,10 @@ local CardAimbotTargetRight = AimbotTab:CreateCard({
 })
 CardAimbotTargetRight:CreateDropdown({
 	Name = "Preferred Hitbox",
-	Options = { "Head", "HumanoidRootPart", "Torso", "Random" },
+	Options = { "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso", "Random", "Nearest Bone", "Smart Multi-Point" },
 	Default = "Head",
 	Callback = function(opt)
-		CombatState.TargetPart = (opt == "Head" and "Head") or "HumanoidRootPart"
+		CombatState.TargetPart = opt
 	end,
 })
 CardAimbotTargetRight:CreateSlider({
@@ -1268,7 +1425,7 @@ CardAimbotAccRight:CreateToggle({
 })
 CardAimbotAccRight:CreateDropdown({
 	Name = "Resolver Algorithm",
-	Options = { "Spatial Density Cluster (UE)", "Centroid Density", "Kalman Prediction" },
+	Options = { "Spatial Density Cluster (UE)", "Centroid Density", "Kalman Prediction", "Velocity Extrapolation", "Inverse Acceleration", "Delta Angle Centroid", "History Rewind Tick" },
 	Default = "Spatial Density Cluster (UE)",
 	Callback = function(opt)
 		CombatState.ResolverMethod = opt
@@ -2239,6 +2396,17 @@ local function UpdateSelfAura()
 		emitter.SpreadAngle = Vector2.new(180, 0)
 		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3 * szMul), NumberSequenceKeypoint.new(1, 2.0 * szMul)})
 		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)})
+	elseif effect == "Vortex Singularity" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 50
+		emitter.Lifetime = NumberRange.new(0.4, 0.8)
+		emitter.Speed = NumberRange.new(-5, -2)
+		emitter.SpreadAngle = Vector2.new(360, 360)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.2 * szMul), NumberSequenceKeypoint.new(1, 0.1)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.8)})
 	end
 end
 
@@ -3370,6 +3538,7 @@ CardSelfEffects:CreateDropdown({
 		"Cyber Matrix",
 		"Angelic Halo",
 		"Pulsing Ring",
+		"Vortex Singularity",
 	},
 	Default = VisualsState.SelfAuraEffect or "Electric Sparks",
 	Callback = function(opt)
@@ -3535,12 +3704,32 @@ NVL_Connect(RunService.Heartbeat, function(dt)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if not hrp or not hum then return end
 
-	-- Speed Assist (CFrame or Velocity mode, 0 impact)
+	-- Speed Assist (7 rich movement modes, 0 impact)
 	if MovementState.SpeedEnabled and hum.MoveDirection.Magnitude > 0 and hum.Health > 0 then
-		if MovementState.SpeedMode == "Velocity" then
+		local mode = MovementState.SpeedMode or "CFrame"
+		if mode == "Velocity" then
 			local vel = hum.MoveDirection * MovementState.SpeedValue
 			hrp.AssemblyLinearVelocity = Vector3.new(vel.X, hrp.AssemblyLinearVelocity.Y, vel.Z)
-		else
+		elseif mode == "Impulse Step" then
+			local impulse = hum.MoveDirection * ((MovementState.SpeedValue - 16) * hrp.AssemblyMass * dt * 15)
+			hrp:ApplyImpulse(Vector3.new(impulse.X, 0, impulse.Z))
+		elseif mode == "Bhop Boost" then
+			hum.Jump = true
+			local mult = math.clamp(MovementState.SpeedValue / 16, 1, 4)
+			hrp.AssemblyLinearVelocity = Vector3.new(hum.MoveDirection.X * 16 * mult, hrp.AssemblyLinearVelocity.Y, hum.MoveDirection.Z * 16 * mult)
+		elseif mode == "TP Dash" then
+			local dashDist = math.clamp(MovementState.SpeedValue * dt, 0.4, 3.5)
+			hrp.CFrame = hrp.CFrame + (hum.MoveDirection * dashDist)
+		elseif mode == "Frictionless" then
+			local vel = hum.MoveDirection * MovementState.SpeedValue
+			hrp.AssemblyLinearVelocity = Vector3.new(vel.X, hrp.AssemblyLinearVelocity.Y, vel.Z)
+			pcall(function() hrp.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0, 0, 0) end)
+		elseif mode == "Matrix Glide" then
+			local targetHVel = hum.MoveDirection * MovementState.SpeedValue
+			local curHVel = Vector3.new(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z)
+			local lerped = curHVel:Lerp(targetHVel, math.clamp(dt * 12, 0.1, 1))
+			hrp.AssemblyLinearVelocity = Vector3.new(lerped.X, hrp.AssemblyLinearVelocity.Y, lerped.Z)
+		else -- "CFrame"
 			local speedBonus = math.max(MovementState.SpeedValue - 16, 0)
 			hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (speedBonus * dt))
 		end
@@ -3576,13 +3765,51 @@ NVL_Connect(RunService.RenderStepped, function(dt)
 	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
 	if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
 
-	if MovementState.FlyMode == "Velocity" then
+	local flyMode = MovementState.FlyMode or "CFrame"
+	if flyMode == "Velocity" then
 		if moveDir.Magnitude > 0 then
 			hrp.AssemblyLinearVelocity = moveDir.Unit * MovementState.FlySpeed
 		else
 			hrp.AssemblyLinearVelocity = Vector3.zero
 		end
-	else
+	elseif flyMode == "Glide Vector" then
+		if not MovementState._glideVel then MovementState._glideVel = Vector3.zero end
+		local targetV = (moveDir.Magnitude > 0 and moveDir.Unit * MovementState.FlySpeed) or Vector3.zero
+		MovementState._glideVel = MovementState._glideVel:Lerp(targetV, math.clamp(dt * 6, 0.05, 1))
+		hrp.AssemblyLinearVelocity = MovementState._glideVel
+	elseif flyMode == "Helicopter" then
+		if not MovementState._heliY then MovementState._heliY = hrp.Position.Y end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+			MovementState._heliY = MovementState._heliY + (MovementState.FlySpeed * dt * 0.7)
+		elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+			MovementState._heliY = MovementState._heliY - (MovementState.FlySpeed * dt * 0.7)
+		end
+		local pDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+		local pUnit = (pDir.Magnitude > 0 and pDir.Unit) or Vector3.zero
+		hrp.CFrame = CFrame.new(Vector3.new(hrp.Position.X, MovementState._heliY, hrp.Position.Z) + (pUnit * (MovementState.FlySpeed * dt)), hrp.Position + camCF.LookVector)
+		hrp.AssemblyLinearVelocity = Vector3.zero
+	elseif flyMode == "Hover Anti-Gravity" then
+		hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z)
+		if moveDir.Magnitude > 0 then
+			hrp.CFrame = hrp.CFrame + (moveDir.Unit * (MovementState.FlySpeed * dt))
+		end
+	elseif flyMode == "Camera Align" then
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		local look = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z).Unit
+		hrp.CFrame = CFrame.new(hrp.Position, hrp.Position + look)
+		if moveDir.Magnitude > 0 then
+			hrp.CFrame = hrp.CFrame + (moveDir.Unit * (MovementState.FlySpeed * dt))
+		end
+	elseif flyMode == "Bypass Step" then
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		if moveDir.Magnitude > 0 then
+			local steps = 4
+			local stepDist = (MovementState.FlySpeed * dt) / steps
+			for _ = 1, steps do
+				hrp.CFrame = hrp.CFrame + (moveDir.Unit * stepDist)
+			end
+		end
+	else -- "CFrame"
 		hrp.AssemblyLinearVelocity = Vector3.zero
 		if moveDir.Magnitude > 0 then
 			hrp.CFrame = hrp.CFrame + (moveDir.Unit * (MovementState.FlySpeed * dt))
@@ -3626,7 +3853,7 @@ CardSpeed:CreateToggle({
 })
 CardSpeed:CreateDropdown({
 	Name = "Speed Mode",
-	Options = { "CFrame", "Velocity" },
+	Options = { "CFrame", "Velocity", "Impulse Step", "Bhop Boost", "TP Dash", "Frictionless", "Matrix Glide" },
 	Default = "CFrame",
 	Callback = function(opt)
 		MovementState.SpeedMode = opt
@@ -3721,7 +3948,7 @@ CardFlight:CreateToggle({
 })
 CardFlight:CreateDropdown({
 	Name = "Fly Mode",
-	Options = { "CFrame", "Velocity" },
+	Options = { "CFrame", "Velocity", "Glide Vector", "Helicopter", "Hover Anti-Gravity", "Camera Align", "Bypass Step" },
 	Default = "CFrame",
 	Callback = function(opt)
 		MovementState.FlyMode = opt
@@ -4089,6 +4316,8 @@ local function GetDesyncMaterialEnum(matName)
 	elseif matName == "SmoothPlastic" then return Enum.Material.SmoothPlastic
 	elseif matName == "Ghost" then return Enum.Material.ForceField
 	elseif matName == "Wireframe" then return Enum.Material.ForceField
+	elseif matName == "Holographic" then return Enum.Material.ForceField
+	elseif matName == "Foil Gloss" then return Enum.Material.Foil
 	end
 	return Enum.Material.Neon
 end
@@ -4197,6 +4426,17 @@ local function ApplyGhostAura(ghostHrp)
 		emitter.SpreadAngle = Vector2.new(180, 0)
 		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3 * szMul), NumberSequenceKeypoint.new(1, 2.0 * szMul)})
 		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)})
+	elseif DesyncState.AuraEffect == "Vortex Singularity" then
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(auraCol)
+		emitter.LightEmission = 1
+		emitter.LightInfluence = 0
+		emitter.Rate = 50
+		emitter.Lifetime = NumberRange.new(0.4, 0.8)
+		emitter.Speed = NumberRange.new(-5, -2)
+		emitter.SpreadAngle = Vector2.new(360, 360)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.2 * szMul), NumberSequenceKeypoint.new(1, 0.1)})
+		emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.8)})
 	end
 end
 
@@ -4221,6 +4461,12 @@ local function ApplyGhostTextures(ghostModel)
 			elseif style == "Galaxy Nebula" then
 				item.Material = Enum.Material.Glass
 				item.Reflectance = 0.9
+			elseif style == "Cyber Pulse" then
+				item.Material = Enum.Material.Neon
+				item.Reflectance = 0.4
+			elseif style == "Quantum Grid" then
+				item.Material = Enum.Material.DiamondPlate
+				item.Reflectance = 0.6
 			elseif style == "Original Outfit" then
 				item.Material = Enum.Material.SmoothPlastic
 				item.Reflectance = 0
@@ -4548,6 +4794,11 @@ NVL_Connect(RunService.Heartbeat, function()
 			offset = Vector3.new(math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount), 0, math.random(-DesyncState.RandomAmount, DesyncState.RandomAmount))
 		elseif DesyncState.Mode == "Safe Shoot" then
 			offset = Vector3.new(math.random(-3, 3), -5, math.random(-3, 3))
+		elseif DesyncState.Mode == "Orbital Spin" then
+			local t = tick() * 6
+			offset = Vector3.new(math.cos(t) * 12, 0, math.sin(t) * 12)
+		elseif DesyncState.Mode == "Invert Centroid" then
+			offset = -hrp.CFrame.LookVector * 16
 		end
 		desyncCF = hrp.CFrame + offset
 	end
@@ -4565,7 +4816,7 @@ end)
 local FakeLagState = {
 	Enabled = false,
 	ChokeTicks = 12,
-	Mode = "Static", -- Static, Pulse, Random
+	Mode = "Static", -- 7 modes: Static, Pulse, Random, Step Jitter, Fluctuate, Adaptive Peek, Velocity Choke
 	Visualize = false,
 }
 
@@ -4578,10 +4829,24 @@ NVL_Connect(RunService.Heartbeat, function()
 
 	fakeLagTickCount = fakeLagTickCount + 1
 	local limit = FakeLagState.ChokeTicks
-	if FakeLagState.Mode == "Random" then
-		limit = math.random(4, FakeLagState.ChokeTicks)
-	elseif FakeLagState.Mode == "Pulse" then
+	local mode = FakeLagState.Mode or "Static"
+
+	if mode == "Random" then
+		limit = math.random(3, FakeLagState.ChokeTicks)
+	elseif mode == "Pulse" then
 		limit = (fakeLagTickCount % 2 == 0) and 2 or FakeLagState.ChokeTicks
+	elseif mode == "Step Jitter" then
+		limit = ((math.floor(tick() * 10)) % FakeLagState.ChokeTicks) + 1
+	elseif mode == "Fluctuate" then
+		limit = math.floor(math.abs(math.sin(os.clock() * 4)) * math.max(FakeLagState.ChokeTicks - 2, 1)) + 2
+	elseif mode == "Adaptive Peek" then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		limit = (hum and hum.MoveDirection.Magnitude > 0) and 2 or FakeLagState.ChokeTicks
+	elseif mode == "Velocity Choke" then
+		local spd = hrp.AssemblyLinearVelocity.Magnitude
+		limit = math.clamp(math.floor((spd / 24) * FakeLagState.ChokeTicks), 2, FakeLagState.ChokeTicks)
+	else -- "Static"
+		limit = FakeLagState.ChokeTicks
 	end
 
 	if fakeLagTickCount >= limit then
@@ -4656,7 +4921,7 @@ CardDesync:CreateToggle({
 })
 CardDesync:CreateDropdown({
 	Name = "Desync Mode",
-	Options = { "Freeze", "Jitter", "Custom", "Underground", "Void", "Random", "Safe Shoot" },
+	Options = { "Freeze", "Jitter", "Custom", "Underground", "Void", "Random", "Safe Shoot", "Orbital Spin", "Invert Centroid" },
 	Default = "Freeze",
 	Callback = function(opt)
 		DesyncState.Mode = opt
@@ -4740,7 +5005,7 @@ CardDesyncViz:CreateToggle({
 })
 CardDesyncViz:CreateDropdown({
 	Name = "Visualize Material",
-	Options = { "Neon", "ForceField", "Glass", "Ghost", "Wireframe", "SmoothPlastic" },
+	Options = { "Neon", "ForceField", "Glass", "Ghost", "Wireframe", "SmoothPlastic", "Holographic", "Foil Gloss" },
 	Default = "Neon",
 	Callback = function(opt)
 		DesyncState.VizMaterial = opt
@@ -4758,7 +5023,7 @@ CardDesyncViz:CreateSlider({
 })
 CardDesyncViz:CreateDropdown({
 	Name = "Texture Style",
-	Options = { "Clean Shaded", "Original Outfit", "Hologram Scanlines", "Grid Matrix", "Galaxy Nebula", "Chrome" },
+	Options = { "Clean Shaded", "Original Outfit", "Hologram Scanlines", "Grid Matrix", "Galaxy Nebula", "Chrome", "Cyber Pulse", "Quantum Grid" },
 	Default = "Clean Shaded",
 	Callback = function(opt)
 		DesyncState.TextureStyle = opt
@@ -4767,7 +5032,7 @@ CardDesyncViz:CreateDropdown({
 })
 CardDesyncViz:CreateDropdown({
 	Name = "Aura Effect",
-	Options = { "None", "Electric Sparks", "Cosmic Stardust", "Dark Flame", "Cyber Matrix", "Angelic Halo", "Pulsing Ring" },
+	Options = { "None", "Electric Sparks", "Cosmic Stardust", "Dark Flame", "Cyber Matrix", "Angelic Halo", "Pulsing Ring", "Vortex Singularity" },
 	Default = "None",
 	Callback = function(opt)
 		DesyncState.AuraEffect = opt
@@ -4849,7 +5114,7 @@ CardFakeLag:CreateSlider({
 })
 CardFakeLag:CreateDropdown({
 	Name = "Lag Pattern",
-	Options = { "Static", "Pulse", "Random" },
+	Options = { "Static", "Pulse", "Random", "Step Jitter", "Fluctuate", "Adaptive Peek", "Velocity Choke" },
 	Default = "Static",
 	Callback = function(opt)
 		FakeLagState.Mode = opt
@@ -4945,6 +5210,15 @@ HUDCard:CreateToggle({
 	Callback = function(v)
 		if Spectators and Spectators.SetVisible then
 			Spectators.SetVisible(v)
+		end
+	end,
+})
+HUDCard:CreateToggle({
+	Name = "Keybinds HUD",
+	Default = true,
+	Callback = function(v)
+		if Keybinds and Keybinds.SetVisible then
+			Keybinds.SetVisible(v)
 		end
 	end,
 })

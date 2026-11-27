@@ -1133,6 +1133,238 @@ function MemoryUI:CreateSpectators(config)
 end
 
 -- ========================================================================
+-- Floating Keybinds HUD Window (Neverlose-Style Dynamic Active Binds Tracker)
+-- ========================================================================
+MemoryUI.RegisteredKeybinds = {}
+
+function MemoryUI:RegisterKeybind(data)
+	if not data or not data.Name then return end
+	MemoryUI.RegisteredKeybinds[data.Name] = data
+	if self.KeybindsInstance and self.KeybindsInstance.Refresh then
+		self.KeybindsInstance:Refresh()
+	end
+end
+
+function MemoryUI:UnregisterKeybind(name)
+	MemoryUI.RegisteredKeybinds[name] = nil
+	if self.KeybindsInstance and self.KeybindsInstance.Refresh then
+		self.KeybindsInstance:Refresh()
+	end
+end
+
+function MemoryUI:CreateKeybinds(config)
+	config = config or {}
+	local title = config.Title or "Keybinds"
+	local visible = (config.Visible ~= false)
+
+	if self.KeybindsInstance and self.KeybindsInstance.WindowFrame then
+		self.KeybindsInstance.WindowFrame:Destroy()
+		self.KeybindsInstance = nil
+	end
+
+	local WindowFrame = Create("Frame", {
+		Name = "KeybindsWindow",
+		Parent = self.ScreenGui,
+		Size = UDim2.new(0, 195, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Position = config.Position or UDim2.new(0, 20, 0, 210),
+		BackgroundColor3 = Color3.fromRGB(9, 10, 11),
+		BorderSizePixel = 0,
+		Visible = visible,
+		ZIndex = 80,
+	})
+	Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = WindowFrame })
+	Create("UIStroke", { Parent = WindowFrame, Color = Color3.fromRGB(20, 23, 28), Thickness = 1 })
+
+	-- Header
+	local Header = Create("Frame", {
+		Parent = WindowFrame,
+		Size = UDim2.new(1, 0, 0, 30),
+		BackgroundTransparency = 1,
+		ZIndex = 81,
+	})
+	Create("ImageLabel", {
+		Parent = Header,
+		Size = UDim2.new(0, 13, 0, 13),
+		Position = UDim2.new(0, 10, 0.5, -6.5),
+		BackgroundTransparency = 1,
+		Image = Assets.Icons.sliders or "rbxassetid://10734941499",
+		ImageColor3 = Theme.Accent,
+		ScaleType = Enum.ScaleType.Fit,
+		ZIndex = 82,
+	})
+	Create("TextLabel", {
+		Parent = Header,
+		Size = UDim2.new(1, -45, 1, 0),
+		Position = UDim2.new(0, 28, 0, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = title,
+		TextColor3 = Theme.TextBright,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 82,
+	})
+	Create("ImageLabel", {
+		Parent = Header,
+		Size = UDim2.new(0, 12, 0, 12),
+		Position = UDim2.new(1, -20, 0.5, -6),
+		BackgroundTransparency = 1,
+		Image = Assets.Icons.dots_2 or "",
+		ImageColor3 = Color3.fromRGB(90, 90, 100),
+		ScaleType = Enum.ScaleType.Fit,
+		ZIndex = 82,
+	})
+	Create("Frame", {
+		Parent = WindowFrame,
+		Size = UDim2.new(1, 0, 0, 1),
+		Position = UDim2.new(0, 0, 0, 30),
+		BackgroundColor3 = Color3.fromRGB(19, 20, 22),
+		BorderSizePixel = 0,
+		ZIndex = 81,
+	})
+
+	-- Binds Container
+	local BindsContainer = Create("Frame", {
+		Name = "BindsContainer",
+		Parent = WindowFrame,
+		Size = UDim2.new(1, 0, 0, 0),
+		Position = UDim2.new(0, 0, 0, 31),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		ZIndex = 81,
+	})
+	Create("UIListLayout", {
+		Parent = BindsContainer,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 0),
+	})
+	Create("UIPadding", {
+		Parent = BindsContainer,
+		PaddingTop = UDim.new(0, 4),
+		PaddingBottom = UDim.new(0, 6),
+	})
+
+	-- Empty Placeholder label when no binds are active
+	local EmptyLabel = Create("TextLabel", {
+		Name = "EmptyLabel",
+		Parent = BindsContainer,
+		Size = UDim2.new(1, 0, 0, 22),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		Text = "[no active binds]",
+		TextColor3 = Color3.fromRGB(80, 85, 100),
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = 82,
+	})
+
+	-- Draggable Header
+	local dragging, dragStart, startPos
+	Header.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startPos = WindowFrame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local delta = input.Position - dragStart
+			WindowFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+
+	local controller = {
+		WindowFrame = WindowFrame,
+		Header = Header,
+		BindsContainer = BindsContainer,
+	}
+
+	function controller:SetVisible(vis)
+		WindowFrame.Visible = vis
+	end
+
+	function controller:Toggle()
+		WindowFrame.Visible = not WindowFrame.Visible
+	end
+
+	function controller:Refresh()
+		for _, ch in ipairs(BindsContainer:GetChildren()) do
+			if ch:IsA("Frame") and ch.Name:sub(1, 5) == "Bind_" then
+				ch:Destroy()
+			end
+		end
+
+		local activeCount = 0
+		for name, bindData in pairs(MemoryUI.RegisteredKeybinds) do
+			if bindData.ShowInBinds then
+				local isActive = false
+				if type(bindData.IsActive) == "function" then
+					local s, res = pcall(bindData.IsActive)
+					isActive = s and res
+				elseif bindData.Active ~= nil then
+					isActive = bindData.Active
+				end
+
+				if isActive then
+					activeCount = activeCount + 1
+					local row = Create("Frame", {
+						Name = "Bind_" .. name,
+						Parent = BindsContainer,
+						Size = UDim2.new(1, 0, 0, 22),
+						BackgroundTransparency = 1,
+						ZIndex = 82,
+					})
+
+					-- Feature Name (Left)
+					Create("TextLabel", {
+						Parent = row,
+						Size = UDim2.new(1, -65, 1, 0),
+						Position = UDim2.new(0, 10, 0, 0),
+						BackgroundTransparency = 1,
+						Font = Enum.Font.GothamMedium,
+						Text = name,
+						TextColor3 = Theme.TextWhite,
+						TextSize = 10.5,
+						TextXAlignment = Enum.TextXAlignment.Left,
+						TextTruncate = Enum.TextTruncate.AtEnd,
+						ZIndex = 83,
+					})
+
+					-- Mode Badge (Right: e.g. [toggle] in Accent color)
+					local modeText = string.lower(bindData.Mode or "toggle")
+					Create("TextLabel", {
+						Parent = row,
+						Size = UDim2.new(0, 52, 1, 0),
+						Position = UDim2.new(1, -58, 0, 0),
+						BackgroundTransparency = 1,
+						Font = Enum.Font.GothamBold,
+						Text = "[" .. modeText .. "]",
+						TextColor3 = Theme.Accent,
+						TextSize = 10,
+						TextXAlignment = Enum.TextXAlignment.Right,
+						ZIndex = 83,
+					})
+				end
+			end
+		end
+
+		EmptyLabel.Visible = (activeCount == 0)
+	end
+
+	self.KeybindsInstance = controller
+	controller:Refresh()
+	return controller
+end
+
+-- ========================================================================
 -- Dropdown Management (Auto-close on tab switch, prevent bleed-through)
 -- ========================================================================
 function MemoryUI:CloseActiveDropdown()
@@ -2278,6 +2510,12 @@ function MemoryUI:CreateWindow(config)
 		Tabs = Tabs,
 		CreateWatermark = function(self, cfg) return MemoryUI:CreateWatermark(cfg) end,
 		CreateSpectators = function(self, cfg) return MemoryUI:CreateSpectators(cfg) end,
+		CreateKeybinds = function(self, cfg) return MemoryUI:CreateKeybinds(cfg) end,
+		SetKeybindsVisible = function(self, vis)
+			if MemoryUI.KeybindsInstance then
+				MemoryUI.KeybindsInstance:SetVisible(vis)
+			end
+		end,
 	}
 
 	function Window:FilterSearch(query)
@@ -2691,6 +2929,21 @@ function MemoryUI:CreateWindow(config)
 				local currentMode = toggleConfig.Mode or "Toggle"
 				local showInBinds = toggleConfig.ShowInBinds or false
 
+				local function UpdateBindRegistry()
+					if currentKey and showInBinds then
+						MemoryUI:RegisterKeybind({
+							Name = toggleName,
+							Key = currentKey,
+							Mode = currentMode,
+							ShowInBinds = showInBinds,
+							IsActive = function() return currentState end,
+						})
+					else
+						MemoryUI:UnregisterKeybind(toggleName)
+					end
+				end
+				UpdateBindRegistry()
+
 				local Row = Create("Frame", {
 					Name = "Toggle_" .. toggleName,
 					Parent = ItemsContainer,
@@ -2747,6 +3000,7 @@ function MemoryUI:CreateWindow(config)
 								if settingsData.Key ~= nil then currentKey = settingsData.Key end
 								if settingsData.Mode ~= nil then currentMode = settingsData.Mode end
 								if settingsData.ShowInBinds ~= nil then showInBinds = settingsData.ShowInBinds end
+								UpdateBindRegistry()
 								if toggleConfig.OnSettings then
 									pcall(toggleConfig.OnSettings, settingsData)
 								end
@@ -2838,6 +3092,9 @@ function MemoryUI:CreateWindow(config)
 						})
 					end
 					pcall(callback, currentState)
+					if MemoryUI.KeybindsInstance then
+						MemoryUI.KeybindsInstance:Refresh()
+					end
 				end
 
 				Pill.MouseButton1Click:Connect(function() SetState(not currentState) end)
